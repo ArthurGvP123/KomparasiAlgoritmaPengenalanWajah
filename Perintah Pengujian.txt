@@ -6,24 +6,46 @@ deactivate
 python.exe -m pip install --upgrade pip
 pip install numpy scikit-learn matplotlib
 
-##### 1 - PERINTAH PROGRAM 03A UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+##### 1a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03A_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.3
+  python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.3
 }
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03A_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.5
+  python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.5
 }
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03A_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.7
+  python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.7
 }
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
-##### 2 - PERINTAH PROGRAM 03A UNTUK SALAH SATU ALGORITMA #####
+##### 1b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
 
 python 03A_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
+
+Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
+
+##### 2a - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+
+Get-ChildItem .\embeds\*.npz | ForEach-Object {
+  python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.3
+}
+
+Get-ChildItem .\embeds\*.npz | ForEach-Object {
+  python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.5
+}
+
+Get-ChildItem .\embeds\*.npz | ForEach-Object {
+  python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.7
+}
+
+Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
+
+##### 2b - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
+
+python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
 Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian

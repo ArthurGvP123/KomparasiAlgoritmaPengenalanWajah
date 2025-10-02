@@ -15,7 +15,7 @@
   "TN@thr": 6050,
   "FP@thr": 0,
   "FN@thr": 5480,
-  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_lvface_l.npz",
+  "embeds": "C:\\Users\\USER\\Downloads\\Komparasi 12 Algoritma Pengenalan Wajah\\embeds\\embeds_lvface_l.npz",
   "pairs_input": "eval_verif_cosine\\embeds_lvface_l\\embeds_lvface_l_pairs_auto_thr0.70.csv",
   "pairs_fixed": "eval_verif_cosine\\embeds_lvface_l\\embeds_lvface_l_pairs_fixed_thr0.70.csv",
   "pairs_auto": "eval_verif_cosine\\embeds_lvface_l\\embeds_lvface_l_pairs_auto_thr0.70.csv",

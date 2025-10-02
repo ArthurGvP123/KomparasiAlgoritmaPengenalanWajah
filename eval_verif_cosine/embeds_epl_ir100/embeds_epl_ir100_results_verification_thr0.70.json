@@ -15,7 +15,7 @@
   "TN@thr": 6049,
   "FP@thr": 1,
   "FN@thr": 3096,
-  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_epl_ir100.npz",
+  "embeds": "C:\\Users\\USER\\Downloads\\Komparasi 12 Algoritma Pengenalan Wajah\\embeds\\embeds_epl_ir100.npz",
   "pairs_input": "eval_verif_cosine\\embeds_epl_ir100\\embeds_epl_ir100_pairs_auto_thr0.70.csv",
   "pairs_fixed": "eval_verif_cosine\\embeds_epl_ir100\\embeds_epl_ir100_pairs_fixed_thr0.70.csv",
   "pairs_auto": "eval_verif_cosine\\embeds_epl_ir100\\embeds_epl_ir100_pairs_auto_thr0.70.csv",

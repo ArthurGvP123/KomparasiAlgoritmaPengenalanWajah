@@ -262,7 +262,7 @@ def eval_verification_pipeline(
     algo_dir = eval_root / algo
     algo_dir.mkdir(parents=True, exist_ok=True)
 
-    metrics_all_csv = eval_root / "metrics_all.csv"
+    metrics_all_csv = eval_root / "metrics_all_cosine.csv"
 
     # --- SELALU: generate pairs otomatis dari embeddings
     pairs_auto, id2keys = build_pairs_from_embeds(str(embeds_path), pos_per_id=pos_per_id, seed=seed)

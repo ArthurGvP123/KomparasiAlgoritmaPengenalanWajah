@@ -15,7 +15,7 @@
   "TN@thr": 5878,
   "FP@thr": 172,
   "FN@thr": 169,
-  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_cvlface_vitb_kprpe.npz",
+  "embeds": "C:\\Users\\USER\\Downloads\\Komparasi 12 Algoritma Pengenalan Wajah\\embeds\\embeds_cvlface_vitb_kprpe.npz",
   "pairs_input": "eval_verif_cosine\\embeds_cvlface_vitb_kprpe\\embeds_cvlface_vitb_kprpe_pairs_auto_thr0.30.csv",
   "pairs_fixed": "eval_verif_cosine\\embeds_cvlface_vitb_kprpe\\embeds_cvlface_vitb_kprpe_pairs_fixed_thr0.30.csv",
   "pairs_auto": "eval_verif_cosine\\embeds_cvlface_vitb_kprpe\\embeds_cvlface_vitb_kprpe_pairs_auto_thr0.30.csv",
