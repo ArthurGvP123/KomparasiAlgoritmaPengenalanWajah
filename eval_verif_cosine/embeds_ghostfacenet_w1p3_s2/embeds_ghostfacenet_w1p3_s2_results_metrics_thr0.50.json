@@ -1,0 +1,23 @@
+{
+  "algo": "embeds_ghostfacenet_w1p3_s2",
+  "TP": 6050,
+  "TN": 0,
+  "FP": 6050,
+  "FN": 0,
+  "total_pairs": 12100,
+  "threshold_used": 0.5,
+  "threshold_source": "fixed",
+  "accuracy": 0.5,
+  "precision": 0.5,
+  "recall": 1.0,
+  "f1": 0.66666667,
+  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_ghostfacenet_w1p3_s2.npz",
+  "pairs_fixed": "eval_verif_cosine\\embeds_ghostfacenet_w1p3_s2\\embeds_ghostfacenet_w1p3_s2_pairs_fixed_thr0.50.csv",
+  "pairs_auto": "eval_verif_cosine\\embeds_ghostfacenet_w1p3_s2\\embeds_ghostfacenet_w1p3_s2_pairs_auto_thr0.50.csv",
+  "roc_png": "eval_verif_cosine\\embeds_ghostfacenet_w1p3_s2\\roc_embeds_ghostfacenet_w1p3_s2_thr0.50.png",
+  "AUC": 0.6195586640256814,
+  "EER": 0.803801652892562,
+  "TAR@1e-4": 0.031735537190082645,
+  "TAR@1e-3": 0.047603305785123964,
+  "TAR@1e-2": 0.09338842975206611
+}

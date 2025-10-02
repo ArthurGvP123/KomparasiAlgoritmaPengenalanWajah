@@ -1,0 +1,23 @@
+{
+  "algo": "embeds_magface_ir100",
+  "TP": 830,
+  "TN": 5970,
+  "FP": 80,
+  "FN": 5220,
+  "total_pairs": 12100,
+  "threshold_used": 0.7,
+  "threshold_source": "fixed",
+  "accuracy": 0.56198347,
+  "precision": 0.91208791,
+  "recall": 0.13719008,
+  "f1": 0.23850575,
+  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_magface_ir100.npz",
+  "pairs_fixed": "eval_verif_cosine\\embeds_magface_ir100\\embeds_magface_ir100_pairs_fixed_thr0.70.csv",
+  "pairs_auto": "eval_verif_cosine\\embeds_magface_ir100\\embeds_magface_ir100_pairs_auto_thr0.70.csv",
+  "roc_png": "eval_verif_cosine\\embeds_magface_ir100\\roc_embeds_magface_ir100_thr0.70.png",
+  "AUC": 0.7080160781367393,
+  "EER": 0.667603305785124,
+  "TAR@1e-4": 0.04644628099173554,
+  "TAR@1e-3": 0.06644628099173554,
+  "TAR@1e-2": 0.12380165289256198
+}

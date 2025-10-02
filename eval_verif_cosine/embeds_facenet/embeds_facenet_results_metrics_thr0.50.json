@@ -1,0 +1,23 @@
+{
+  "algo": "embeds_facenet",
+  "TP": 5912,
+  "TN": 5211,
+  "FP": 839,
+  "FN": 138,
+  "total_pairs": 12100,
+  "threshold_used": 0.5,
+  "threshold_source": "fixed",
+  "accuracy": 0.9192562,
+  "precision": 0.87572212,
+  "recall": 0.97719008,
+  "f1": 0.92367784,
+  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_facenet.npz",
+  "pairs_fixed": "eval_verif_cosine\\embeds_facenet\\embeds_facenet_pairs_fixed_thr0.50.csv",
+  "pairs_auto": "eval_verif_cosine\\embeds_facenet\\embeds_facenet_pairs_auto_thr0.50.csv",
+  "roc_png": "eval_verif_cosine\\embeds_facenet\\roc_embeds_facenet_thr0.50.png",
+  "AUC": 0.9870032374837785,
+  "EER": 0.09388429752066119,
+  "TAR@1e-4": 0.6366942148760331,
+  "TAR@1e-3": 0.751900826446281,
+  "TAR@1e-2": 0.8895867768595042
+}

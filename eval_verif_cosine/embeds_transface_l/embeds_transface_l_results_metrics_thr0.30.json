@@ -1,0 +1,23 @@
+{
+  "algo": "embeds_transface_l",
+  "TP": 6009,
+  "TN": 1201,
+  "FP": 4849,
+  "FN": 41,
+  "total_pairs": 12100,
+  "threshold_used": 0.3,
+  "threshold_source": "fixed",
+  "accuracy": 0.59586777,
+  "precision": 0.55341684,
+  "recall": 0.99322314,
+  "f1": 0.71078779,
+  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_transface_l.npz",
+  "pairs_fixed": "eval_verif_cosine\\embeds_transface_l\\embeds_transface_l_pairs_fixed_thr0.30.csv",
+  "pairs_auto": "eval_verif_cosine\\embeds_transface_l\\embeds_transface_l_pairs_auto_thr0.30.csv",
+  "roc_png": "eval_verif_cosine\\embeds_transface_l\\roc_embeds_transface_l_thr0.30.png",
+  "AUC": 0.8852091387200327,
+  "EER": 0.3988429752066116,
+  "TAR@1e-4": 0.05785123966942149,
+  "TAR@1e-3": 0.1722314049586777,
+  "TAR@1e-2": 0.31983471074380165
+}

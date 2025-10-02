@@ -1,0 +1,23 @@
+{
+  "algo": "embeds_curricularface_ir101",
+  "TP": 5853,
+  "TN": 5966,
+  "FP": 84,
+  "FN": 197,
+  "total_pairs": 12100,
+  "threshold_used": 0.3,
+  "threshold_source": "fixed",
+  "accuracy": 0.97677686,
+  "precision": 0.98585144,
+  "recall": 0.96743802,
+  "f1": 0.97655794,
+  "embeds": "D:\\KOMPARASI ALGORITMA FACE RECOGNITION\\embeds\\embeds_curricularface_ir101.npz",
+  "pairs_fixed": "eval_verif_cosine\\embeds_curricularface_ir101\\embeds_curricularface_ir101_pairs_fixed_thr0.30.csv",
+  "pairs_auto": "eval_verif_cosine\\embeds_curricularface_ir101\\embeds_curricularface_ir101_pairs_auto_thr0.30.csv",
+  "roc_png": "eval_verif_cosine\\embeds_curricularface_ir101\\roc_embeds_curricularface_ir101_thr0.30.png",
+  "AUC": 0.9915436923707398,
+  "EER": 0.04330578512396699,
+  "TAR@1e-4": 0.2991735537190083,
+  "TAR@1e-3": 0.9538842975206612,
+  "TAR@1e-2": 0.9646280991735537
+}
