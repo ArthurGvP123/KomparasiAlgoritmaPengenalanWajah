@@ -1,12 +1,21 @@
 ##### 0 - PERSIAPAN VIRTUAL ENVIRONMENT #####
 
-py -m venv .venv_pengujian
+py -3.10 -m venv .venv_pengujian
 .venv_pengujian\Scripts\Activate.ps1
 deactivate
-python.exe -m pip install --upgrade pip
+python -m pip install --upgrade pip wheel setuptools
+pip install -r requirements.txt
+
+pip install --prefer-binary insightface==0.7.3
+
+pip install insightface onnxruntime opencv-python tqdm
 pip install numpy scikit-learn matplotlib
 
-##### 1a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+##### 1a - PERINTAH PROGRAM 01 #####
+
+python 01_merapikan_dataset.py --size 160 --mode both
+
+##### 2a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
   python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.3
@@ -22,13 +31,13 @@ Get-ChildItem .\embeds\*.npz | ForEach-Object {
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
-##### 1b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
+##### 2b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
 
 python 03A_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
 Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
 
-##### 2a - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+##### 3a - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
   python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.3
@@ -44,7 +53,7 @@ Get-ChildItem .\embeds\*.npz | ForEach-Object {
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
-##### 2b - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
+##### 3b - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
 
 python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
