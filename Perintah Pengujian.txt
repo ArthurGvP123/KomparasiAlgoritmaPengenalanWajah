@@ -73,8 +73,9 @@ Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengu
 python 04_kesimpulan_evaluasi.py `
   --cosine-csv eval_verif_cosine/metrics_all_cosine.csv `
   --euclidean-csv eval_verif_euclidean/metrics_all_euclidean.csv `
-  --threshold-round 2 `
   --out kesimpulan_evaluasi.csv
+
+Note: Sesuaikan nama dan direktori file perhitungan metrik
 
 ##### 5 #####
 
