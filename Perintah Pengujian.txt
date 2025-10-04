@@ -6,16 +6,21 @@ deactivate
 python -m pip install --upgrade pip wheel setuptools
 pip install -r requirements.txt
 
-pip install --prefer-binary insightface==0.7.3
+##### 1 - PERINTAH PROGRAM 01 #####
 
-pip install insightface onnxruntime opencv-python tqdm
-pip install numpy scikit-learn matplotlib
+python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode both --gallery-per-id 3
 
-##### 1a - PERINTAH PROGRAM 01 #####
+python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode gallery --gallery-per-id 3
 
-python 01_merapikan_dataset.py --size 160 --mode both
+python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode none
 
-##### 2a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+Note:
+a. mode both untuk mensortir foto dataset menjadi folder gallery dan probe
+b. mode gallery untuk mensortir foto dataset ke folder gallery saja
+c. mode none membuat program tidak melakukan sortir, melainkan hanya direktori murni dataset saja
+d. default ukuran fungsi norm_crop adalah 112 dan 224, jika ingin diluar dari itu maka akan dipilih ukuran terdekat kemudian dilakukan resize
+
+##### 3a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
   python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.3
@@ -31,13 +36,13 @@ Get-ChildItem .\embeds\*.npz | ForEach-Object {
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
-##### 2b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
+##### 3b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
 
 python 03A_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
 Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
 
-##### 3a - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+##### 3c - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
 Get-ChildItem .\embeds\*.npz | ForEach-Object {
   python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.3
@@ -53,8 +58,44 @@ Get-ChildItem .\embeds\*.npz | ForEach-Object {
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
-##### 3b - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
+##### 3d - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
 
 python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
 Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
+
+##### 4 #####
+
+python 04_pengenalan_realtime.py `
+  --npz embeds/embeds_adaface_ir100.npz `
+  --algo adaface `
+  --sim cosine `
+  --threshold 0.5 `
+  --camera 0 `
+  --show_score
+
+python 04_pengenalan_realtime.py `
+  --embeds_path embeds/embeds_adaface_ir100.npz `
+  --repo_dir algoritma/AdaFace `
+  --arch ir_101 `
+  --ckpt_path algoritma/weights/adaface_ir101_ms1mv2.ckpt `
+  --similarity cosine `
+  --threshold 0.5
+
+python 04_pengenalan_realtime.py `
+  --embeds_path embeds/embeds_adaface_ir100.npz `
+  --repo_dir algoritma/AdaFace `
+  --arch ir_101 `
+  --ckpt_path algoritma/weights/adaface_ir101_ms1mv2.ckpt `
+  --similarity cosine --threshold 0.5 `
+  --detector dnn
+
+python 04_pengenalan_realtime.py `
+  --embeds_path embeds/embeds_adaface_ir100.npz `
+  --repo_dir algoritma/AdaFace `
+  --arch ir_101 `
+  --ckpt_path algoritma/weights/adaface_ir101_ms1mv2.ckpt `
+  --similarity cosine --threshold 0.5 `
+  --detector dnn `
+  --label_from parentdir `
+  --collapse mean
