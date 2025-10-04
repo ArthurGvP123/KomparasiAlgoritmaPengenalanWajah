@@ -15,3 +15,30 @@ tensorflow
 h5py
 torchvision
 dlib-bin
+
+# ---Library Program 01---
+# insightface
+# onnxruntime
+# opencv-python
+# tqdm
+
+# ---Library Program 02---
+# numpy
+# opencv-python
+# tqdm
+# torch
+# huggingface-hub
+# transformers
+# safetensors
+# pillow
+# dlib
+# facenet-pytorch
+# tensorflow
+# h5py
+# torchvision
+# onnxruntime
+
+# ---Library Program 03---
+# numpy
+# scikit-learn
+# matplotlib
