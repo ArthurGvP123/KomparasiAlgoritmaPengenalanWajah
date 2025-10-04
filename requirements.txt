@@ -5,3 +5,13 @@ tqdm
 numpy
 scikit-learn
 matplotlib
+torch
+huggingface-hub
+transformers
+safetensors
+pillow
+facenet-pytorch
+tensorflow
+h5py
+torchvision
+dlib-bin
