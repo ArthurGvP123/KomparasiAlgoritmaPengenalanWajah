@@ -10,23 +10,29 @@ pip install -r requirements.txt
 
 ##### 1 - PERINTAH PROGRAM 01 UNTUK MEMOTONG DAN MERAPIKAN DATASET #####
 
-python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode both --gallery-per-id 3
+python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --sort on --probe-per-id 2
 
-python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode gallery --gallery-per-id 3
+python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --sort on --probe-per-id 0
 
-python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode none
+python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --sort off
 
 Note:
-a. mode both untuk mensortir foto dataset menjadi folder gallery dan probe
-b. mode gallery untuk mensortir foto dataset ke folder gallery saja
-c. mode none membuat program tidak melakukan sortir, melainkan hanya direktori murni dataset saja
-d. default ukuran fungsi norm_crop adalah 112 dan 224, jika ingin diluar dari itu maka akan dipilih ukuran terdekat kemudian dilakukan resize
+a. default ukuran fungsi norm_crop adalah 112 dan 224, jika ingin diluar dari itu maka akan dipilih ukuran terdekat kemudian dilakukan resize
+b. --sort on untuk mensortir foto dataset menjadi folder gallery dan probe
+c. --sort off membuat program tidak melakukan sortir, melainkan hanya direktori murni dataset saja
+d. --probe-per-id untuk menentukan banyaknya foto yang tersimpan dalam folder probe
 
 ---
 
 ##### 2 - PERINTAH PROGRAM 02 UNTUK EMBEDDING ALGORITMA #####
 
-
+python .\02_embed_adaface.py `
+  --root ".\dataset\Dosen_112\gallery" `
+  --weights ".\weights\CurricularFace_Backbone.pth" `
+  --magface-repo "D:\KEVIN SUKA SAMBEL\1-CurricularFace" `
+  --arch ir100 `
+  --out ".\embeds_curricularface_ir101.npz" `
+  --batch 128
 
 ---
 
@@ -128,3 +134,10 @@ python 05_pengenalan_realtime.py `
   --detector dnn `
   --label_from parentdir `
   --collapse mean
+
+---
+
+##### TAMBAHAN #####
+
+python test_read_npz.py
+Note: untuk membaca isi embedding pada file npz
