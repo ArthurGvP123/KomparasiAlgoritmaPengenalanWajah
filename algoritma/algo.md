@@ -11,6 +11,7 @@ Dokumen ini merangkum **repositori resmi** yang digunakan, beserta perintah **cl
 
 ## Clone Semua Sekaligus
 
+```bash
 # Clone cepat (shallow) agar lebih ringan. Hapus --depth=1 jika perlu riwayat penuh.
 git clone --depth=1 https://github.com/HuangYG123/CurricularFace
 git clone --depth=1 https://github.com/IrvingMeng/MagFace
@@ -24,25 +25,28 @@ git clone --depth=1 https://github.com/WakingHours-GitHub/EPL
 git clone --depth=1 https://github.com/bytedance/LVFace
 git clone --depth=1 https://github.com/davisking/dlib
 git clone --depth=1 https://github.com/timesler/facenet-pytorch
+```
+
+---
 
 # Perubahan dari Repositori Original
 
-Dalam proyek ini ada beberapa perbaikan compatibility (penanganan tensor non-contiguous, inisialisasi bobot, dll).
-Salin & timpa isi file berikut sesuai path di proyek kamu.
+Dalam proyek ini ada beberapa perbaikan compatibility (penanganan tensor non-contiguous, inisialisasi bobot, dll).  
+**Salin & timpa** isi file berikut sesuai path di proyek kamu.
 
-Catatan: Path yang ditulis di bawah mengacu ke struktur proyek lokal kamu (mis. folder algoritma/...). Jika struktur berbeda, sesuaikan lokasinya.
+> Catatan: Path yang ditulis di bawah mengacu ke struktur proyek lokal kamu (mis. folder `algoritma/...`). Jika struktur berbeda, sesuaikan lokasinya.
 
-## 1. algoritma/CurricularFace/backbone/model_irse.py
+---
 
+## 1. `algoritma/CurricularFace/backbone/model_irse.py`
+
+```python
 import torch
 import torch.nn as nn
-from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, ReLU, Sigmoid, Dropout, MaxPool2d, \
-    AdaptiveAvgPool2d, Sequential, Module
+from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, ReLU, Sigmoid, Dropout, MaxPool2d,     AdaptiveAvgPool2d, Sequential, Module
 from collections import namedtuple
 
-
-### Support: ['IR_50', 'IR_101', 'IR_152', 'IR_SE_50', 'IR_SE_101', 'IR_SE_152']
-
+# Support: ['IR_50', 'IR_101', 'IR_152', 'IR_SE_50', 'IR_SE_101', 'IR_SE_152']
 
 class Flatten(Module):
     def forward(self, input):
@@ -50,12 +54,10 @@ class Flatten(Module):
         # safer for non-contiguous tensors:
         return torch.flatten(input, 1)
 
-
 def l2_norm(input, axis=1):
     norm = torch.norm(input, 2, axis, True)
     output = torch.div(input, norm)
     return output
-
 
 class SEModule(Module):
     def __init__(self, channels, reduction):
@@ -81,7 +83,6 @@ class SEModule(Module):
         x = self.sigmoid(x)
         return module_input * x
 
-
 class bottleneck_IR(Module):
     def __init__(self, in_channel, depth, stride):
         super(bottleneck_IR, self).__init__()
@@ -101,7 +102,6 @@ class bottleneck_IR(Module):
         shortcut = self.shortcut_layer(x)
         res = self.res_layer(x)
         return res + shortcut
-
 
 class bottleneck_IR_SE(Module):
     def __init__(self, in_channel, depth, stride):
@@ -126,14 +126,11 @@ class bottleneck_IR_SE(Module):
         res = self.res_layer(x)
         return res + shortcut
 
-
 class Bottleneck(namedtuple('Block', ['in_channel', 'depth', 'stride'])):
     '''A named tuple describing a ResNet block.'''
 
-
 def get_block(in_channel, depth, num_units, stride=2):
     return [Bottleneck(in_channel, depth, stride)] + [Bottleneck(depth, depth, 1) for i in range(num_units - 1)]
-
 
 def get_blocks(num_layers):
     if num_layers == 50:
@@ -158,7 +155,6 @@ def get_blocks(num_layers):
             get_block(in_channel=256, depth=512, num_units=3)
         ]
     return blocks
-
 
 class Backbone(Module):
     def __init__(self, input_size, num_layers, mode='ir'):
@@ -226,13 +222,11 @@ def IR_50(input_size):
     model = Backbone(input_size, 50, 'ir')
     return model
 
-
 def IR_101(input_size):
     """Constructs a ir-101 model.
     """
     model = Backbone(input_size, 100, 'ir')
     return model
-
 
 def IR_152(input_size):
     """Constructs a ir-152 model.
@@ -240,13 +234,11 @@ def IR_152(input_size):
     model = Backbone(input_size, 152, 'ir')
     return model
 
-
 def IR_SE_50(input_size):
     """Constructs a ir_se-50 model.
     """
     model = Backbone(input_size, 50, 'ir_se')
     return model
-
 
 def IR_SE_101(input_size):
     """Constructs a ir_se-101 model.
@@ -254,22 +246,24 @@ def IR_SE_101(input_size):
     model = Backbone(input_size, 100, 'ir_se')
     return model
 
-
 def IR_SE_152(input_size):
     """Constructs a ir_se-152 model.
     """
     model = Backbone(input_size, 152, 'ir_se')
     return model
+```
 
-## 2. algoritma/AdaFace/net.py
+---
 
+## 2. `algoritma/AdaFace/net.py`
+
+```python
 from collections import namedtuple
 import torch
 import torch.nn as nn
 from torch.nn import Dropout, MaxPool2d, Sequential
 from torch.nn import Conv2d, Linear, BatchNorm1d, BatchNorm2d
 from torch.nn import ReLU, Sigmoid, Module, PReLU
-
 
 def build_model(model_name='ir_50'):
     if model_name == 'ir_101':
@@ -284,7 +278,6 @@ def build_model(model_name='ir_50'):
         return IR_18(input_size=(112, 112))
     else:
         raise ValueError('not a correct model name', model_name)
-
 
 def initialize_weights(modules):
     """Kaiming init untuk Conv/Linear, BN diisi 1/0."""
@@ -301,13 +294,11 @@ def initialize_weights(modules):
             if m.bias is not None:
                 m.bias.data.zero_()
 
-
 class Flatten(Module):
     """Meratakan tensor NCHW -> N x (C*H*W) dengan aman untuk non-contiguous."""
     def forward(self, input):
         # gunakan reshape agar aman untuk non-contiguous
         return input.reshape(input.size(0), -1)
-
 
 class LinearBlock(Module):
     """Conv + BN tanpa aktivasi."""
@@ -320,7 +311,6 @@ class LinearBlock(Module):
         x = self.conv(x)
         x = self.bn(x)
         return x
-
 
 class GNAP(Module):
     """Global Norm-Aware Pooling."""
@@ -342,7 +332,6 @@ class GNAP(Module):
         feature = self.bn2(x)
         return feature
 
-
 class GDC(Module):
     """Global Depthwise Convolution block."""
     def __init__(self, in_c, embedding_size):
@@ -358,7 +347,6 @@ class GDC(Module):
         x = self.linear(x)
         x = self.bn(x)
         return x
-
 
 class SEModule(Module):
     """Squeeze-and-Excitation block."""
@@ -379,7 +367,6 @@ class SEModule(Module):
         x = self.fc2(x)
         x = self.sigmoid(x)
         return module_input * x
-
 
 class BasicBlockIR(Module):
     """BasicBlock untuk IRNet."""
@@ -403,7 +390,6 @@ class BasicBlockIR(Module):
         shortcut = self.shortcut_layer(x)
         res = self.res_layer(x)
         return res + shortcut
-
 
 class BottleneckIR(Module):
     """Bottleneck untuk IRNet."""
@@ -432,27 +418,21 @@ class BottleneckIR(Module):
         res = self.res_layer(x)
         return res + shortcut
 
-
 class BasicBlockIRSE(BasicBlockIR):
     def __init__(self, in_channel, depth, stride):
         super(BasicBlockIRSE, self).__init__(in_channel, depth, stride)
         self.res_layer.add_module("se_block", SEModule(depth, 16))
-
 
 class BottleneckIRSE(BottleneckIR):
     def __init__(self, in_channel, depth, stride):
         super(BottleneckIRSE, self).__init__(in_channel, depth, stride)
         self.res_layer.add_module("se_block", SEModule(depth, 16))
 
-
 class Bottleneck(namedtuple('Block', ['in_channel', 'depth', 'stride'])):
     """Deskripsi blok ResNet."""
 
-
 def get_block(in_channel, depth, num_units, stride=2):
-    return [Bottleneck(in_channel, depth, stride)] + \
-           [Bottleneck(depth, depth, 1) for _ in range(num_units - 1)]
-
+    return [Bottleneck(in_channel, depth, stride)] +            [Bottleneck(depth, depth, 1) for _ in range(num_units - 1)]
 
 def get_blocks(num_layers):
     if num_layers == 18:
@@ -500,7 +480,6 @@ def get_blocks(num_layers):
     else:
         raise ValueError("Unsupported num_layers")
     return blocks
-
 
 class Backbone(Module):
     def __init__(self, input_size, num_layers, mode='ir'):
@@ -565,46 +544,41 @@ class Backbone(Module):
         output = torch.div(x, norm)
         return output, norm
 
-
 def IR_18(input_size):
     return Backbone(input_size, 18, 'ir')
-
 
 def IR_34(input_size):
     return Backbone(input_size, 34, 'ir')
 
-
 def IR_50(input_size):
     return Backbone(input_size, 50, 'ir')
-
 
 def IR_101(input_size):
     return Backbone(input_size, 100, 'ir')
 
-
 def IR_152(input_size):
     return Backbone(input_size, 152, 'ir')
-
 
 def IR_200(input_size):
     return Backbone(input_size, 200, 'ir')
 
-
 def IR_SE_50(input_size):
     return Backbone(input_size, 50, 'ir_se')
-
 
 def IR_SE_101(input_size):
     return Backbone(input_size, 100, 'ir_se')
 
-
 def IR_SE_152(input_size):
     return Backbone(input_size, 152, 'ir_se')
 
-
 def IR_SE_200(input_size):
     return Backbone(input_size, 200, 'ir_se')
+```
 
-## JIka masih ada kendala, unduh repositori lengkapnya yang sudah dimodifikasi melalui link drive berikut:
+---
 
-- [Google Drive – Repositori Algoritma](https://drive.google.com/drive/folders/1aSw_qF2TgxW3qsc-LJMKzUfFcJhi6DcA?usp=sharing)
+## Jika masih ada kendala
+
+Unduh repositori lengkap yang sudah dimodifikasi melalui tautan berikut:
+
+- **[Google Drive – Repositori Algoritma](https://drive.google.com/drive/folders/1aSw_qF2TgxW3qsc-LJMKzUfFcJhi6DcA?usp=sharing)**
