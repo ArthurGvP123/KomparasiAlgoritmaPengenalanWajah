@@ -6,6 +6,8 @@ deactivate
 python -m pip install --upgrade pip wheel setuptools
 pip install -r requirements.txt
 
+---
+
 ##### 1 - PERINTAH PROGRAM 01 UNTUK MEMOTONG DAN MERAPIKAN DATASET #####
 
 python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --mode both --gallery-per-id 3
@@ -20,9 +22,13 @@ b. mode gallery untuk mensortir foto dataset ke folder gallery saja
 c. mode none membuat program tidak melakukan sortir, melainkan hanya direktori murni dataset saja
 d. default ukuran fungsi norm_crop adalah 112 dan 224, jika ingin diluar dari itu maka akan dipilih ukuran terdekat kemudian dilakukan resize
 
+---
+
 ##### 2 - PERINTAH PROGRAM 02 UNTUK EMBEDDING ALGORITMA #####
 
 
+
+---
 
 ##### 3a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
@@ -40,11 +46,15 @@ Get-ChildItem .\embeds\*.npz | ForEach-Object {
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
+---
+
 ##### 3b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
 
 python 03A_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
 Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
+
+---
 
 ##### 3c - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
 
@@ -62,11 +72,15 @@ Get-ChildItem .\embeds\*.npz | ForEach-Object {
 
 Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
 
+---
+
 ##### 3d - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
 
 python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
 
 Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
+
+---
 
 ##### 4 - PERINTAH PROGRAM 04 UNTUK MENARIK KESIMPULAN ######
 
@@ -76,6 +90,8 @@ python 04_kesimpulan_evaluasi.py `
   --out kesimpulan_evaluasi.csv
 
 Note: Sesuaikan nama dan direktori file perhitungan metrik
+
+---
 
 ##### 5 #####
 
