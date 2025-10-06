@@ -147,6 +147,12 @@ python 03_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz
 
 Note: Perintah menargetkan satu file npz yang dipilih. Ubah nama embedding dan nilai threshold yang ingin digunakan dalam pengujian
 
+foreach ($t in 0.3,0.5,0.7) {
+  python 03_evaluasi_performa_cosine.py --embeds-dir .\embeds --fixed-thr $t --outdir eval_verif_cosine
+}
+
+Note: Perintah menjalankan program dengan lebih dari satu threshold. Ubah nama embedding dan nilai threshold yang ingin digunakan dalam pengujian
+
 ---
 
 ##### 3B - PERINTAH PROGRAM 03 UJI IDENTIFIKASI DENGAN EUCLIDEAN DISTANCE #####
@@ -162,6 +168,12 @@ Note: Perintah menargetkan seluruh file npz dalam folder embeds. Ubah nilai thre
 python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --fixed-thr 1.0 --outdir eval_verif_euclidean
 
 Note: Perintah menargetkan satu file npz yang dipilih. Ubah nama embedding dan nilai threshold yang ingin digunakan dalam pengujian
+
+foreach ($t in 1.1832,1.0,0.7746) {
+  python 03_evaluasi_performa_euclidean.py --embeds-dir .\embeds --fixed-thr $t --outdir eval_verif_euclidean
+}
+
+Note: Perintah menjalankan program dengan lebih dari satu threshold. Ubah nama embedding dan nilai threshold yang ingin digunakan dalam pengujian
 
 ---
 
