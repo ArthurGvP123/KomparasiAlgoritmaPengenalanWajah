@@ -15,6 +15,9 @@ tensorflow
 h5py
 torchvision
 dlib-bin
+omegaconf
+einops
+timm
 
 # ---Library Program 01---
 # insightface
@@ -37,6 +40,9 @@ dlib-bin
 # h5py
 # torchvision
 # onnxruntime
+# omegaconf
+# einops
+# timm
 
 # ---Library Program 03---
 # numpy

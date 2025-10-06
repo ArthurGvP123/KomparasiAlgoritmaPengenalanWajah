@@ -36,7 +36,6 @@ class IBasicBlock(nn.Module):
         self.bn3 = nn.BatchNorm2d(planes, eps=2e-05, momentum=0.9)
         self.downsample = downsample
         self.stride = stride
-
     def forward(self, x):
         identity = x
         out = self.bn1(x)
@@ -75,7 +74,6 @@ class IResNet(nn.Module):
         self.dropout = nn.Dropout2d(p=0.4, inplace=True)
         self.fc = nn.Linear(512 * block.expansion * self.fc_scale, num_classes)
         self.features = nn.BatchNorm1d(num_classes, eps=2e-05, momentum=0.9)
-
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -85,7 +83,6 @@ class IResNet(nn.Module):
             for m in self.modules():
                 if isinstance(m, IBasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)
-
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         downsample = None; previous_dilation = self.dilation
         if dilate:
@@ -103,7 +100,6 @@ class IResNet(nn.Module):
             layers.append(block(self.inplanes, planes, groups=self.groups,
                                 base_width=self.base_width, dilation=self.dilation))
         return nn.Sequential(*layers)
-
     def forward(self, x):
         x = self.conv1(x); x = self.bn1(x); x = self.prelu(x)
         x = self.layer1(x); x = self.layer2(x); x = self.layer3(x); x = self.layer4(x)
@@ -136,7 +132,6 @@ def embed_batch(model, batch_imgs, device):
     y = model(x)
     if isinstance(y, (list, tuple)): y = y[0]
     elif isinstance(y, dict):
-        # ambil salah satu kunci umum bila dict
         for k in ("embeddings","feat","features","last_hidden_state","pooler_output","output"):
             if k in y: y = y[k]; break
         else:
@@ -164,13 +159,11 @@ def build_model(arch: str):
 def load_backbone(weight_path: str, arch: str, device: str):
     model = build_model(arch)
     try:
-        ckpt = torch.load(weight_path, map_location="cpu")
+        ckpt = torch.load(weight_path, map_location="cpu", weights_only=True)  # PyTorch>=2.4
     except TypeError:
         ckpt = torch.load(weight_path, map_location="cpu")
-    # ambil state_dict bila ada
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
         ckpt = ckpt["state_dict"]
-    # bersihkan prefix & buang head yang tak cocok
     cleaned = {}
     skipped = []
     for k, v in (ckpt.items() if isinstance(ckpt, dict) else []):
@@ -178,14 +171,10 @@ def load_backbone(weight_path: str, arch: str, device: str):
         for pref in ("module.","model.","backbone.","features.module.","features."):
             if nk.startswith(pref):
                 nk = nk[len(pref):]
-        # buang head/classifier/arc-margin
         if any(nk.startswith(p) for p in ("head.","margin.","arcface.","logits.","classifier.","fc.weight","fc.bias")):
-            skipped.append((k, "head_or_classifier"))
-            continue
+            skipped.append((k, "head_or_classifier")); continue
         cleaned[nk] = v
-
     missing, unexpected = model.load_state_dict(cleaned, strict=False)
-
     print(f"[Info] Loaded params: {len(cleaned)-len(missing)} | missing={len(missing)} | unexpected={len(unexpected)}")
     if skipped:
         print("[Info] Skipped (head/fc), contoh <=10:")
@@ -199,19 +188,26 @@ def load_backbone(weight_path: str, arch: str, device: str):
         print("[Warn] Contoh unexpected <=10:")
         for i,k in enumerate(unexpected[:10],1):
             print(f"  {i:02d}. {k}")
-
     model.eval().to(device).float()
     return model
 
+def _list_images(root: Path):
+    exts = (".jpg",".jpeg",".png")
+    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
+
 def main():
     ap = argparse.ArgumentParser(description="LAFS embedding (IResNet backbone) – streaming NPZ")
-    ap.add_argument("--root",   default="./crops_112", help="root gambar aligned 112x112")
-    ap.add_argument("--weights",required=True, help="path ke checkpoint LAFS (pth/pt)")
-    ap.add_argument("--arch",   default="ir100", choices=["ir100","ir50"], help="backbone yang cocok")
-    ap.add_argument("--out",    default="./embeds_lafs_ir100.npz")
+    # Argumen seragam (disamakan dengan skrip lain)
+    ap.add_argument("--repo-name", default="", help="Folder repo LAFS (opsional, tidak wajib dipakai)")
+    ap.add_argument("--dataset-name", required=True, help="Folder dataset aligned (mis. .\\dataset\\Dosen_112)")
+    ap.add_argument("--weights", required=True, help="Path checkpoint LAFS (.pth/.pt)")
+    ap.add_argument("--arch", default="ir100", choices=["ir100","ir50"], help="Backbone yang cocok")
+    ap.add_argument("--out", required=True, help="Path output .npz (atau zip npy)")
+
+    # Lainnya
     ap.add_argument("--batch",  type=int, default=128)
     ap.add_argument("--device", choices=["cpu","cuda"], default="cpu")
-    ap.add_argument("--limit",  type=int, default=0, help="uji sebagian gambar (0=semua)")
+    ap.add_argument("--limit",  type=int, default=0, help="Uji sebagian gambar (0=semua)")
     ap.add_argument("--no-compress", action="store_true", help="NPZ tanpa kompresi (lebih cepat, file lebih besar)")
     args = ap.parse_args()
 
@@ -219,25 +215,31 @@ def main():
     if args.device=="cuda" and device!="cuda":
         log("CUDA tidak tersedia, fallback ke CPU")
 
-    root = Path(args.root)
-    exts = (".jpg",".jpeg",".png")
-    paths = sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
-    log(f"ditemukan {len(paths)} gambar di {args.root}")
+    dataset_root = Path(args.dataset_name).resolve()
+    out = Path(args.out).resolve()
+    if not dataset_root.exists():
+        sys.exit(f"[ERROR] Folder dataset tidak ditemukan: {dataset_root}")
+    if not Path(args.weights).exists():
+        sys.exit(f"[ERROR] File weights tidak ditemukan: {args.weights}")
+
+    paths = _list_images(dataset_root)
+    log(f"dataset_root : {dataset_root}")
+    log(f"out_path     : {out}")
+    log(f"ditemukan {len(paths)} gambar di {dataset_root}")
     if not paths:
-        print("[!] Tidak ada gambar. Pastikan 01_align sudah jalan."); return
+        print("[!] Tidak ada gambar. Pastikan 01_merapikan_dataset sudah jalan."); return
     if args.limit>0:
         paths = paths[:args.limit]; log(f"MODE UJI: {len(paths)} gambar.")
 
     log(f"load_backbone: {args.arch} | weights={args.weights}")
     model = load_backbone(args.weights, args.arch, device)
 
-    out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
     comp = _zip_compression(not args.no_compress)
-
-    rels = [str(Path(p).relative_to(root)).replace("\\","/") for p in paths]
+    rels = [str(Path(p).relative_to(dataset_root)).replace("\\","/") for p in paths]
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
+    out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(str(out), mode="w", compression=comp, allowZip64=True) as zf:
         for i, p in enumerate(tqdm(paths, desc=f"Embedding[LAFS-{args.arch} {device}]")):
             img = cv2.imread(p)

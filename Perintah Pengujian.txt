@@ -11,6 +11,8 @@ pip install -r requirements.txt
 ##### 1 - PERINTAH PROGRAM 01 UNTUK MEMOTONG DAN MERAPIKAN DATASET #####
 
 python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --sort on --probe-per-id 2
+python 01_merapikan_dataset.py --dataset-name Dosen --size 160 --sort on --probe-per-id 2
+python 01_merapikan_dataset.py --dataset-name Dosen --size 150 --sort on --probe-per-id 2
 
 python 01_merapikan_dataset.py --dataset-name Dosen --size 112 --sort on --probe-per-id 0
 
@@ -26,13 +28,108 @@ d. --probe-per-id untuk menentukan banyaknya foto yang tersimpan dalam folder pr
 
 ##### 2 - PERINTAH PROGRAM 02 UNTUK EMBEDDING ALGORITMA #####
 
-python .\02_embed_adaface.py `
-  --root ".\dataset\Dosen_112\gallery" `
-  --weights ".\weights\CurricularFace_Backbone.pth" `
-  --magface-repo "D:\KEVIN SUKA SAMBEL\1-CurricularFace" `
-  --arch ir100 `
-  --out ".\embeds_curricularface_ir101.npz" `
+python 02_embed_adaface.py `
+  --repo-name ".\algoritma\AdaFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\adaface_ir101_ms1mv2.ckpt" `
+  --arch ir101 `
+  --out ".\embeds\embeds_adaface_ir101.npz" `
   --batch 128
+
+python 02_embed_curricularface.py `
+  --repo-name ".\algoritma\CurricularFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\CurricularFace_Backbone.pth" `
+  --arch irse101 `
+  --out ".\embeds\embeds_curricularface_ir101.npz" `
+  --batch 128
+
+python 02_embed_cvlface.py `
+  --dataset-name ".\dataset\Dosen_112" `
+  --hf-id "minchul/cvlface_adaface_vit_base_kprpe_webface4m" `
+  --out ".\embeds\embeds_cvlface_vitb_kprpe.npz" `
+  --batch 128 `
+  --device cpu
+
+python 02_embed_dlib.py `
+  --repo-name ".\algoritma\dlib" `
+  --dataset-name ".\dataset\Dosen_150" `
+  --weights-recog ".\algoritma\weights\dlib_face_recognition_resnet_model_v1.dat" `
+  --weights-sp5   ".\algoritma\weights\shape_predictor_5_face_landmarks.dat" `
+  --out ".\embeds\embeds_dlib.npz" `
+  --chip-size 150
+
+python 02_embed_elasticface.py `
+  --repo-name ".\algoritma\ElasticFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\elasticface_ir100_backbone.pth" `
+  --arch ir100 `
+  --out ".\embeds\embeds_elasticface_ir100.npz" `
+  --batch 128
+
+python 02_embed_epl.py `
+  --repo-name ".\algoritma\EPL" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\EPL_ResNet100_WebFace12M-002.pth" `
+  --out ".\embeds\embeds_epl_ir100.npz" `
+  --batch 128
+
+python 02_embed_facenet.py `
+  --repo-name ".\algoritma\FaceNet" `
+  --dataset-name ".\dataset\Dosen_160" `
+  --out ".\embeds\embeds_facenet.npz" `
+  --batch 128 `
+  --img-size 160 `
+  --pretrained vggface2
+
+python 02_embed_ghostfacenets.py `
+  --repo-name ".\algoritma\GhostFaceNets" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\GhostFaceNet_W1.3_S2_ArcFace.h5" `
+  --out ".\embeds\embeds_ghostfacenet_w1p3_s2.npz" `
+  --batch 128
+
+python 02_embed_lafs.py `
+  --repo-name ".\algoritma\LAFS" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\LAFS_WebFace4M.pth" `
+  --arch ir100 `
+  --out ".\embeds\embeds_lafs_ir100.npz" `
+  --batch 128
+
+python 02_embed_lvface.py `
+  --repo-name ".\algoritma\LVFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\LVFace-L_Glint360K.onnx" `
+  --format onnx `
+  --out ".\embeds\embeds_lvface_l.npz" `
+  --batch 128
+
+python 02_embed_magface.py `
+  --repo-name ".\algoritma\MagFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\magface_ir100_ms1mv2.pth" `
+  --arch ir100 `
+  --out ".\embeds\embeds_magface_ir100.npz" `
+  --batch 128
+
+python .\02_embed_transface.py `
+  --repo-name ".\algoritma\TransFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\ms1mv2_model_TransFace_L.pt" `
+  --network transface_b `
+  --out ".\embeds\embeds_transface_b.npz" `
+  --batch 128
+
+python 02_embed_transface.py `
+  --repo-name ".\algoritma\TransFace" `
+  --dataset-name ".\dataset\Dosen_112" `
+  --weights ".\algoritma\weights\ms1mv2_model_TransFace_L.pt" `
+  --network transface_l `
+  --out ".\embeds\embeds_transface_vitl.npz" `
+  --batch 128
+
+Note: Sesuaikan argumen sesuai dengan output yang diinginkan
 
 ---
 
@@ -96,44 +193,6 @@ python 04_kesimpulan_evaluasi.py `
   --out kesimpulan_evaluasi.csv
 
 Note: Sesuaikan nama dan direktori file perhitungan metrik
-
----
-
-##### 5 #####
-
-python 05_pengenalan_realtime.py `
-  --npz embeds/embeds_adaface_ir100.npz `
-  --algo adaface `
-  --sim cosine `
-  --threshold 0.5 `
-  --camera 0 `
-  --show_score
-
-python 05_pengenalan_realtime.py `
-  --embeds_path embeds/embeds_adaface_ir100.npz `
-  --repo_dir algoritma/AdaFace `
-  --arch ir_101 `
-  --ckpt_path algoritma/weights/adaface_ir101_ms1mv2.ckpt `
-  --similarity cosine `
-  --threshold 0.5
-
-python 05_pengenalan_realtime.py `
-  --embeds_path embeds/embeds_adaface_ir100.npz `
-  --repo_dir algoritma/AdaFace `
-  --arch ir_101 `
-  --ckpt_path algoritma/weights/adaface_ir101_ms1mv2.ckpt `
-  --similarity cosine --threshold 0.5 `
-  --detector dnn
-
-python 05_pengenalan_realtime.py `
-  --embeds_path embeds/embeds_adaface_ir100.npz `
-  --repo_dir algoritma/AdaFace `
-  --arch ir_101 `
-  --ckpt_path algoritma/weights/adaface_ir101_ms1mv2.ckpt `
-  --similarity cosine --threshold 0.5 `
-  --detector dnn `
-  --label_from parentdir `
-  --collapse mean
 
 ---
 

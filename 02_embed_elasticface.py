@@ -1,11 +1,20 @@
 # 02_embed_elasticface.py
+# ElasticFace embedding (IResNet-100, 112x112) dengan argumen konsisten:
+#   --repo-name ".\algoritma\ElasticFace"
+#   --dataset-name ".\dataset\Dosen_112"
+#   --weights ".\algoritma\weights\elasticface_ir100_backbone.pth"
+#   --arch ir100
+#   --out ".\embeds\embeds_elasticface_ir100.npz"
+#   --batch 128
+#
+# Catatan:
+# - Jika impor iresnet100 dari repo gagal, fallback ke arsitektur internal yang kompatibel (512-D).
+# - Output .npz berisi pasangan key=relpath (relatif ke dataset root), value=vector fitur L2-normalized.
+
 import os, sys, argparse
 from pathlib import Path
 import cv2, numpy as np, torch
 from tqdm import tqdm
-
-HERE = Path(__file__).resolve().parent
-WEIGHTS_DEFAULT = str(HERE / "weights" / "elasticface_ir100_backbone.pth")
 
 # ---------- Fallback IResNet (jika impor dari repo gagal) ----------
 import torch.nn as nn
@@ -48,7 +57,6 @@ class IResNet_Fallback(nn.Module):
     # 112x112 -> 7x7 spatial at the end
     def __init__(self, layers=(3,13,30,3), embedding_size=512):
         super().__init__()
-        self.inplanes = 64
         self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=2e-5, momentum=0.9)
         self.prelu = nn.PReLU(64)
@@ -71,7 +79,7 @@ class IResNet_Fallback(nn.Module):
         x = self.conv1(x); x = self.bn1(x); x = self.prelu(x)
         x = self.layer1(x); x = self.layer2(x); x = self.layer3(x); x = self.layer4(x)
         x = self.bn2(x); x = self.dropout(x)
-        x = x.reshape(x.size(0), -1)  # <- reshape (bukan view)
+        x = x.reshape(x.size(0), -1)  # reshape (aman untuk non-contiguous)
         x = self.fc(x); x = self.features(x)
         return x
 
@@ -79,16 +87,20 @@ class IResNet_Fallback(nn.Module):
 def build_model(elastic_repo: str|None):
     """
     Coba impor iresnet100 dari repo ElasticFace/backbones;
-    bila gagal -> pakai fallback IResNet_Fallback().
+    bila gagal -> pakai fallback IResNet_Fallback() (512-D).
     """
     if elastic_repo:
-        sys.path.append(str(Path(elastic_repo)))
+        repo = Path(elastic_repo).resolve()
+        if repo.exists():
+            sys.path.insert(0, str(repo))
     try:
-        from backbones.iresnet import iresnet100  # repo resmi
-        model = iresnet100(num_classes=512)
+        from backbones.iresnet import iresnet100  # modul dari repo resmi ElasticFace
+        model = iresnet100(num_classes=512)       # backbone-only (512-dim)
+        print(f"[LOG] Loaded iresnet100 from repo.")
         return model
-    except Exception:
-        # fallback internal yang kompatibel shape 512-d
+    except Exception as e:
+        print(f"[WARN] Gagal impor iresnet100 dari repo: {e}")
+        print("[LOG] Menggunakan fallback IResNet_Fallback (kompatibel 512-D).")
         return IResNet_Fallback()
 
 def load_backbone(weight_path: str, elastic_repo: str|None, device: str):
@@ -110,7 +122,7 @@ def load_backbone(weight_path: str, elastic_repo: str|None, device: str):
             for pref in ("module.", "model.", "backbone.", "features.", "encoder."):
                 if nk.startswith(pref):
                     nk = nk[len(pref):]
-            # lewati head klasifikasi (kernel/t/bias dsb)
+            # lewati head klasifikasi
             if any(x in nk for x in ["head.", "margin", "kernel", "bias", "logits"]):
                 continue
             cleaned[nk] = v
@@ -119,17 +131,15 @@ def load_backbone(weight_path: str, elastic_repo: str|None, device: str):
     missing, unexpected = model.load_state_dict(cleaned, strict=False)
     print(f"[Info] Loaded params: {len(cleaned)} | missing={len(missing)} | unexpected={len(unexpected)}")
     if missing or unexpected:
-        sk = list(missing)[:10]
-        print("[Info] Skipped (shape mismatch / not in model), contoh <=10:")
-        for i, n in enumerate(sk, 1):
-            sv = ckpt.get(n, "missing_in_model") if isinstance(ckpt, dict) else "missing_in_model"
-            shape = tuple(sv.shape) if hasattr(sv, "shape") else "missing_in_model"
-            print(f"  {i:02d}. {n}: ckpt{shape} vs modelmissing_in_model")
+        print("[Info] load_state_dict non-strict. Contoh missing (<=10):")
+        for i, n in enumerate(list(missing)[:10], 1):
+            print(f"  {i:02d}. {n}")
     model.eval().to(device).float()
     return model
 
 # ---------- Preprocess & Embed ----------
 def preprocess_arcface(img_bgr, size=112):
+    # RGB, (x-127.5)/128, CHW
     img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     if img.shape[:2] != (size, size):
         img = cv2.resize(img, (size, size), interpolation=cv2.INTER_LINEAR)
@@ -145,62 +155,98 @@ def embed_batch(model, batch_imgs, device):
     if isinstance(y, tuple):
         y = y[0]
     feat = y.detach().cpu().numpy()
-    feat = feat / np.linalg.norm(feat, axis=1, keepdims=True)
+    # L2-normalize per baris
+    feat = feat / (np.linalg.norm(feat, axis=1, keepdims=True) + 1e-12)
     return feat
 
+def collect_images(root: Path):
+    exts = (".jpg", ".jpeg", ".png")
+    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
+
+# ---------- Main ----------
 def main():
-    ap = argparse.ArgumentParser(description="Embed wajah dengan ElasticFace (IResNet-100, 112x112)")
-    ap.add_argument("--root", default=str(HERE/"crops_112"), help="root gambar aligned")
-    ap.add_argument("--weights", default=WEIGHTS_DEFAULT, help="path .pth backbone ElasticFace")
-    ap.add_argument("--elasticface-repo", default=str(HERE/"ElasticFace"), help="folder repo ElasticFace (untuk impor backbones)")
-    ap.add_argument("--arch", default="ir100", choices=["ir100"], help="backbone (tetap ir100 untuk apple-to-apple)")
-    ap.add_argument("--out", default=str(HERE/"embeds_elasticface_ir100.npz"))
+    ap = argparse.ArgumentParser(description="ElasticFace (IResNet-100) embedder, argumen konsisten.")
+    ap.add_argument("--repo-name", required=False, default="",
+                    help="Path folder repo ElasticFace (berisi backbones/iresnet.py). Contoh: .\\algoritma\\ElasticFace")
+    ap.add_argument("--dataset-name", required=True,
+                    help="Path folder dataset aligned (mis. .\\dataset\\Dosen_112)")
+    ap.add_argument("--weights", required=True,
+                    help="Path bobot backbone ElasticFace (.pth). Contoh: .\\algoritma\\weights\\elasticface_ir100_backbone.pth")
+    ap.add_argument("--arch", default="ir100", choices=["ir100"],
+                    help="Backbone (tetap ir100 untuk apple-to-apple).")
+    ap.add_argument("--out", required=True,
+                    help="Path file output .npz (mis. .\\embeds\\embeds_elasticface_ir100.npz)")
     ap.add_argument("--batch", type=int, default=128)
-    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--limit", type=int, default=0, help="debug: batasi jumlah gambar (0=semua)")
+    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
+                    choices=["cpu","cuda"])
+    ap.add_argument("--limit", type=int, default=0, help="Batasi jumlah gambar (debug, 0=semua)")
     args = ap.parse_args()
 
-    print("== ElasticFace Embedding ==")
-    print("[LOG] args:", args)
+    dataset_root = Path(args.dataset_name).resolve()
+    out_path = Path(args.out).resolve()
+    device = "cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu"
+    if args.device == "cuda" and device != "cuda":
+        print("[WARN] CUDA diminta tapi tidak tersedia, pakai CPU.")
 
-    root = Path(args.root)
-    exts = (".jpg", ".jpeg", ".png")
-    paths = sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
-    print(f"[LOG] ditemukan {len(paths)} gambar di {root}")
-    if args.limit and len(paths) > args.limit:
+    print("== ElasticFace Embedding ==")
+    print(f"[LOG] dataset_root : {dataset_root}")
+    print(f"[LOG] out_path     : {out_path}")
+    print(f"[LOG] weights      : {args.weights}")
+    if args.repo_name:
+        print(f"[LOG] repo-name    : {args.repo_name}")
+
+    if not dataset_root.exists():
+        sys.exit(f"[ERROR] Folder dataset tidak ditemukan: {dataset_root}")
+    if not Path(args.weights).exists():
+        sys.exit(f"[ERROR] Bobot tidak ditemukan: {args.weights}")
+
+    # Kumpulkan path gambar
+    paths = collect_images(dataset_root)
+    print(f"[LOG] ditemukan {len(paths)} gambar di {dataset_root}")
+    if not paths:
+        sys.exit("[ERROR] Tidak ada gambar (jpg/jpeg/png) di folder dataset.")
+    if args.limit and args.limit > 0:
         paths = paths[:args.limit]
         print(f"[LOG] MODE UJI: membatasi ke {len(paths)} gambar pertama.")
 
-    if not Path(args.weights).exists():
-        raise FileNotFoundError(f"Bobot tidak ditemukan: {args.weights}")
+    # Muat backbone
+    model = load_backbone(args.weights, args.repo_name or None, device)
 
-    model = load_backbone(args.weights, args.elasticface_repo, args.device)
-
-    rels = [str(Path(p).relative_to(root)).replace("\\", "/") for p in paths]
+    # Proses embedding
+    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
     feats = {}
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
-    for i, p in enumerate(tqdm(paths, desc=f"Embedding[ElasticFace-ir100]")):
+    # sanity check 1 sampel
+    try:
+        smp = cv2.imread(paths[0]); assert smp is not None
+        smp_pre = preprocess_arcface(smp, 112)
+        smp_feat = embed_batch(model, [smp_pre], device)[0]
+        print(f"[LOG] sanity-check: 1 sample feat norm={np.linalg.norm(smp_feat):.6f}")
+    except Exception as e:
+        sys.exit(f"[ERROR] Sanity-check gagal: {e}")
+
+    for i, p in enumerate(tqdm(paths, desc="Embedding[ElasticFace-ir100]")):
         img = cv2.imread(p)
         if img is None:
             continue
-        buf_imgs.append(preprocess_arcface(img, size=112))
+        buf_imgs.append(preprocess_arcface(img, 112))
         buf_idx.append(i)
         if len(buf_imgs) == B:
-            F = embed_batch(model, buf_imgs, args.device)
+            F = embed_batch(model, buf_imgs, device)
             for j, ii in enumerate(buf_idx):
                 feats[rels[ii]] = F[j]
             buf_imgs.clear(); buf_idx.clear()
 
     if buf_imgs:
-        F = embed_batch(model, buf_imgs, args.device)
+        F = embed_batch(model, buf_imgs, device)
         for j, ii in enumerate(buf_idx):
             feats[rels[ii]] = F[j]
 
-    out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out_path, **feats)
+    print(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False

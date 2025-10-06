@@ -1,4 +1,18 @@
 # 02_embed_epl.py
+# EPL (Empirical Prototype Learning) – Embedding generator
+# Argumen konsisten dengan skrip lain:
+#   --repo-name ".\algoritma\EPL"
+#   --dataset-name ".\dataset\Dosen_112"
+#   --weights ".\algoritma\weights\EPL_ResNet100_WebFace12M.pth"
+#   --out ".\embeds\embeds_epl_ir100.npz"
+#   --batch 128 --device cuda
+#
+# Catatan:
+# - Loader ckpt mengharapkan checkpoint yang menyimpan objek model (bukan hanya state_dict),
+#   sehingga backbone dapat diambil langsung. Jika ckpt hanya state_dict, akan error
+#   (butuh definisi kelas persis dari repo EPL untuk merakit model).
+# - Disediakan stub dinamis untuk 'head_VPCL' agar unpickle tidak gagal jika head tidak dibutuhkan.
+
 import os, sys, argparse, types
 from pathlib import Path
 import cv2, numpy as np, torch
@@ -15,6 +29,10 @@ def preprocess_arcface(img_bgr, size=112):
     img = (img - 127.5) / 128.0
     img = np.transpose(img, (2, 0, 1))
     return img
+
+def collect_images(root: Path):
+    exts = (".jpg", ".jpeg", ".png")
+    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
 
 # ----------------- backbone finder helpers -----------------
 def _get_attr_chain(obj, chain: str):
@@ -83,12 +101,12 @@ def _install_stub_head_vpcl():
     # Fallback: kalau ckpt mencari nama yang tidak terdaftar, buat on-demand
     def __getattr__(name):
         return _make_stub(name)
-    mod.__getattr__ = __getattr__  # PEP 562: module-level __getattr__
+    mod.__getattr__ = __getattr__  # PEP 562
 
     sys.modules["head_VPCL"] = mod
 
 # ----------------- import & load ckpt -----------------
-def _safe_import_epl_modules(epl_repo: str):
+def _safe_import_epl_modules(epl_repo: str|None):
     if epl_repo:
         epl_repo = os.path.abspath(epl_repo)
         if epl_repo not in sys.path:
@@ -104,12 +122,12 @@ def _safe_import_epl_modules(epl_repo: str):
     except Exception:
         _install_stub_head_vpcl()
 
-def _load_ckpt_allow_unpickle(weights_path: str, epl_repo: str):
+def _load_ckpt_allow_unpickle(weights_path: str, epl_repo: str|None):
     _safe_import_epl_modules(epl_repo)
     # Gunakan unpickle penuh (pastikan sumber ckpt terpercaya)
     return torch.load(weights_path, map_location="cpu", weights_only=False)
 
-def load_backbone(weights_path: str, device: str = "cpu", epl_repo: str = ""):
+def load_backbone(weights_path: str, device: str = "cpu", epl_repo: str|None = None):
     log(f"[LOG] load_backbone dari ckpt: {weights_path}")
     ckpt = _load_ckpt_allow_unpickle(weights_path, epl_repo)
 
@@ -124,10 +142,10 @@ def load_backbone(weights_path: str, device: str = "cpu", epl_repo: str = ""):
             raise RuntimeError(
                 "Checkpoint hanya berisi state_dict. Tanpa definisi kelas backbone EPL yang persis, "
                 "penyusunan model rawan mismatch. Pakai ckpt yang menyimpan objek model utuh, "
-                "atau sediakan kelas backbone dari repo EPL lalu rakit manual (bisa kubantu jika perlu)."
+                "atau sediakan kelas backbone dari repo EPL lalu rakit manual."
             )
         raise RuntimeError(
-            "Tidak menemukan submodule backbone di checkpoint. Pastikan --epl-repo menunjuk ke repo EPL yang benar "
+            "Tidak menemukan submodule backbone di checkpoint. Pastikan --repo-name menunjuk ke repo EPL yang benar "
             "sehingga kelas custom bisa diimport, atau gunakan ckpt yang menyimpan objek model utuh."
         )
 
@@ -150,43 +168,65 @@ def embed_batch(model, batch_imgs, device):
     if not torch.is_tensor(y):
         raise RuntimeError(f"Output model bukan tensor: {type(y)}")
     feat = y.detach().cpu().numpy()
-    feat = feat / np.linalg.norm(feat, axis=1, keepdims=True)
+    feat = feat / (np.linalg.norm(feat, axis=1, keepdims=True) + 1e-12)
     return feat
 
+# ----------------- main -----------------
 def main():
-    ap = argparse.ArgumentParser(description="EPL – Empirical Prototype Learning | Embedding generator")
-    ap.add_argument("--root", default="crops_112", help="root gambar aligned (112x112)")
-    ap.add_argument("--weights", required=True, help="path checkpoint EPL_ResNet100_WebFace12M.pth")
-    ap.add_argument("--out", default="embeds_epl.npz", help="file output .npz")
+    ap = argparse.ArgumentParser(description="EPL – Empirical Prototype Learning | Embedding generator (argumen konsisten)")
+    ap.add_argument("--repo-name", default="", help="Path repo EPL (berisi backbone.py, dll). Contoh: .\\algoritma\\EPL")
+    ap.add_argument("--dataset-name", required=True, help="Path folder dataset aligned (mis. .\\dataset\\Dosen_112)")
+    ap.add_argument("--weights", required=True, help="Path checkpoint EPL_ResNet100_WebFace12M.pth")
+    ap.add_argument("--out", required=True, help="File output .npz (mis. .\\embeds\\embeds_epl_ir100.npz)")
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--device", choices=["cpu","cuda"], default="cpu")
     ap.add_argument("--limit", type=int, default=0, help="batasi jumlah gambar untuk uji cepat (0=semua)")
-    ap.add_argument("--epl-repo", default="", help="path folder repo EPL yang di-clone (berisi backbone.py, dll)")
     args = ap.parse_args()
 
+    dataset_root = Path(args.dataset_name).resolve()
+    out_path = Path(args.out).resolve()
     device = "cuda" if (args.device=="cuda" and torch.cuda.is_available()) else "cpu"
-    log(f"[LOG] device: {device}")
+    if args.device == "cuda" and device != "cuda":
+        log("[WARN] CUDA diminta tapi tidak tersedia, fallback ke CPU")
 
-    root = Path(args.root)
-    exts = (".jpg",".jpeg",".png")
-    paths = sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
-    log(f"[LOG] ditemukan {len(paths)} gambar di {args.root}")
+    if not dataset_root.exists():
+        sys.exit(f"[ERROR] Folder dataset tidak ditemukan: {dataset_root}")
+    if not Path(args.weights).exists():
+        sys.exit(f"[ERROR] Checkpoint tidak ditemukan: {args.weights}")
+
+    log(f"[LOG] dataset_root : {dataset_root}")
+    log(f"[LOG] out_path     : {out_path}")
+    if args.repo_name:
+        log(f"[LOG] repo-name    : {args.repo_name}")
+
+    paths = collect_images(dataset_root)
+    log(f"[LOG] ditemukan {len(paths)} gambar di {dataset_root}")
+    if not paths:
+        sys.exit("[ERROR] Tidak ada gambar. Pastikan langkah align sudah benar.")
     if args.limit and args.limit>0:
         paths = paths[:args.limit]
-        log(f"[LOG] MODE UJI: membatasi ke {len(paths)} gambar pertama.")
-    if not paths:
-        print("[!] Tidak ada gambar. Pastikan 01_align sudah jalan."); return
+        log(f"[LOG] MODE UJI: membatasi ke {len(paths)} gambar.")
 
-    model = load_backbone(args.weights, device=device, epl_repo=args.epl_repo)
+    # Muat backbone
+    model = load_backbone(args.weights, device=device, epl_repo=(args.repo_name or None))
+
+    # Sanity check satu sampel
+    try:
+        smp = cv2.imread(paths[0]); assert smp is not None
+        smp_pre = preprocess_arcface(smp, 112)
+        smp_feat = embed_batch(model, [smp_pre], device)[0]
+        log(f"[LOG] sanity-check: feat norm={np.linalg.norm(smp_feat):.6f}")
+    except Exception as e:
+        sys.exit(f"[ERROR] Sanity-check gagal: {e}")
 
     feats = {}
-    rels = [str(Path(p).relative_to(root)).replace("\\","/") for p in paths]
+    rels = [str(Path(p).relative_to(dataset_root)).replace("\\","/") for p in paths]
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
     for i, p in enumerate(tqdm(paths, desc=f"Embedding[EPL-backbone {device}]")):
         img = cv2.imread(p)
-        if img is None: 
+        if img is None:
             continue
         buf_imgs.append(preprocess_arcface(img, 112))
         buf_idx.append(i)
@@ -201,8 +241,9 @@ def main():
         for j, ii in enumerate(buf_idx):
             feats[rels[ii]] = F[j]
 
-    np.savez_compressed(args.out, **feats)
-    log(f"[OK] Saved {len(feats)} embeddings -> {args.out}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out_path, **feats)
+    log(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False

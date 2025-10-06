@@ -1,14 +1,14 @@
-# 02_embed_cvlface.py
+# 02_embed_cvlface.py — CVLface ViT-KPRPE (HF) dengan interface seragam (dataset-name & out)
 import os
 import sys
 import argparse
-from pathlib import Path
 import shutil
 import warnings
 import site
 import numpy as np
 import cv2
 import torch
+from pathlib import Path
 from tqdm import tqdm
 
 from huggingface_hub import snapshot_download
@@ -16,9 +16,50 @@ from transformers import AutoModel
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# ======== Layout proyek (relatif file ini) ========
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATASETS_DIR = PROJECT_ROOT / "dataset"
+EMBEDS_DIR   = PROJECT_ROOT / "embeds"
+
+SUPPORTED_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+
 def log(*a): print("[LOG]", *a)
 
-# ----------------- Preprocess -----------------
+
+# ======== Resolver path seragam (seperti skrip lain) ========
+def resolve_under_project_or_base(arg: str, base_dir: Path) -> Path:
+    """
+    Terima 'arg' sebagai path atau hanya 'nama'.
+    Urutan cek:
+      1) arg absolut & ada
+      2) arg relatif dari CWD & ada
+      3) PROJECT_ROOT/arg & ada
+      4) base_dir/arg  (boleh tidak ada; biar error ditangani caller)
+    """
+    p = Path(arg)
+    if p.is_absolute() and p.exists():
+        return p
+    if p.exists():
+        return p.resolve()
+    pp = (PROJECT_ROOT / p)
+    if pp.exists():
+        return pp.resolve()
+    pb = (base_dir / p)
+    return pb.resolve() if pb.exists() else pb
+
+def resolve_dataset_root(arg_dataset: str) -> Path:
+    return resolve_under_project_or_base(arg_dataset, DATASETS_DIR)
+
+def resolve_out_path(out_arg: str) -> Path:
+    p = Path(out_arg)
+    if p.is_absolute():
+        return p
+    if p.parent == Path("."):  # hanya nama file
+        return (EMBEDS_DIR / p.name)
+    return (PROJECT_ROOT / p)
+
+
+# ======== Preprocess ========
 def preprocess_arcface(img_bgr, size=112):
     # RGB, (x-127.5)/128, CHW
     img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -37,11 +78,12 @@ def embed_batch(model, aligner, batch_imgs, device):
     """
     x = torch.from_numpy(np.stack(batch_imgs)).to(device).float()  # [N,3,112,112], ~[-1,1]
 
-    # 1) Dapatkan keypoints dari aligner
-    #    Quickstart HF: aligned_x, orig_ldmks, aligned_ldmks, score, thetas, bbox = aligner(x)
+    # 1) Keypoints dari aligner
+    #    HF return: aligned_x, orig_ldmks, aligned_ldmks, score, thetas, bbox = aligner(x)
     ax, orig_ldmks, *_ = aligner(x)
     keypoints = orig_ldmks  # [N,5,2]
-    # 2) Panggil backbone dengan keypoints
+
+    # 2) Forward backbone dengan keypoints
     y = model(x, keypoints=keypoints)
 
     # 3) Ambil tensor fitur
@@ -57,11 +99,12 @@ def embed_batch(model, aligner, batch_imgs, device):
         raise RuntimeError(f"Unexpected model output type: {type(y)}")
 
     feat = y.detach().cpu().numpy()
-    # L2 norm per baris
+    # L2-normalize per baris (untuk cosine similarity)
     feat = feat / (np.linalg.norm(feat, axis=1, keepdims=True) + 1e-12)
     return feat
 
-# -------- Helpers to satisfy wrapper.py (struktur repo HF) --------
+
+# ======== Helper untuk struktur snapshot HF (wrapper.py expect) ========
 def prepare_pretrained_subdir(model_dir: Path):
     pm = model_dir / "pretrained_model"
     pm.mkdir(exist_ok=True)
@@ -75,7 +118,7 @@ def prepare_pretrained_subdir(model_dir: Path):
 def ensure_models_package(model_dir: Path):
     """
     Beberapa file model berada di root snapshot; wrapper.py meng-import 'models'.
-    Kita buat folder 'models/' dan salin modul-modul yang diperlukan ke sana.
+    Buat folder 'models/' dan salin modul-modul yang diperlukan ke sana.
     """
     mdir = model_dir / "models"
     if not mdir.exists():
@@ -127,7 +170,7 @@ def _try_import_rpe_now(model_dir: Path) -> bool:
         import rpe_index_cpp  # noqa: F401
         return True
     except Exception:
-        # Tambahkan user-site (tempat pyd terinstall) ke sys.path lalu coba lagi
+        # Tambah user-site ke sys.path, lalu coba lagi
         try:
             usr = site.getusersitepackages()
             if usr and usr not in sys.path:
@@ -136,7 +179,7 @@ def _try_import_rpe_now(model_dir: Path) -> bool:
                 return True
         except Exception:
             pass
-        # Coba cari file .pyd hasil build di snapshot
+        # Coba cari .pyd hasil build di snapshot
         cand = list(model_dir.rglob("rpe_ops/build/**/rpe_index_cpp*.pyd"))
         for p in cand:
             pdir = str(Path(p).parent)
@@ -170,12 +213,13 @@ def ensure_rpe_ops_available(model_dir: Path):
     if not _try_import_rpe_now(model_dir):
         raise RuntimeError("`rpe_ops` sudah di-install tapi belum bisa di-import. Jalankan ulang skrip jika masih gagal.")
 
-# ---- Loader utama (backbone + aligner) ----
+
+# ======== Loader utama (backbone + aligner) ========
 def load_backbone(hf_id: str, hf_local: str, device: str):
     if hf_local:
         model_dir = Path(hf_local).resolve()
         if not model_dir.exists():
-            raise FileNotFoundError(f"hf_local tidak ditemukan: {model_dir}")
+            raise FileNotFoundError(f"hf-local tidak ditemukan: {model_dir}")
     else:
         cache_root = Path.home() / ".cvlface_cache" / hf_id.replace("/", "__")
         model_dir = download_snapshot(hf_id, cache_root)
@@ -221,61 +265,91 @@ def load_aligner(device: str, cache_root: Path) -> torch.nn.Module:
     aligner.eval().to(device)
     return aligner
 
-# ----------------- Main -----------------
-def main():
-    ap = argparse.ArgumentParser(description="Embedder CVLface ViT-KPRPE (HF) dengan keypoints dari DFA-mobilenet")
-    ap.add_argument("--root", default="./crops_112", help="root aligned images (112x112)")
-    ap.add_argument("--out",  default="./embeds_cvlface_vitb_kprpe.npz")
-    ap.add_argument("--batch", type=int, default=128)
-    ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
-    ap.add_argument("--hf-id", default="minchul/cvlface_adaface_vit_base_kprpe_webface4m", help="HF repo id (model)")
-    ap.add_argument("--hf-local", default="", help="Path snapshot lokal model (opsional)")
-    ap.add_argument("--limit", type=int, default=0, help="batasi jumlah gambar (0 = semua)")
-    args = ap.parse_args()
 
+# ======== Main ========
+def main():
+    ap = argparse.ArgumentParser(
+        description="Embedder CVLface ViT-KPRPE (HF) + DFA-mobilenet (keypoints) — layout proyek seragam"
+    )
+    # Gaya argumen seragam:
+    ap.add_argument("--dataset-name", required=True,
+                    help="Nama folder dataset di .\\dataset (mis. 'Dosen_112') ATAU path langsung (mis. '.\\dataset\\Dosen_112').")
+    ap.add_argument("--out", default="embeds_cvlface_vitb_kprpe.npz",
+                    help="Nama file .npz (bisa nama saja -> simpan ke .\\embeds, atau path penuh).")
+
+    # Khusus CVLface (HF)
+    ap.add_argument("--hf-id", default="minchul/cvlface_adaface_vit_base_kprpe_webface4m",
+                    help="HuggingFace repo id untuk model backbone.")
+    ap.add_argument("--hf-local", default="",
+                    help="Path snapshot lokal model (opsional, jika sudah diunduh manual).")
+
+    # Lainnya
+    ap.add_argument("--batch", type=int, default=128)
+    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", choices=["cpu", "cuda"])
+    ap.add_argument("--limit", type=int, default=0, help="Batas jumlah gambar untuk uji (0=semua).")
+
+    args = ap.parse_args()
     device = "cuda" if (args.device == "cuda" and torch.cuda.is_available()) else "cpu"
     if args.device == "cuda" and device != "cuda":
         log("CUDA tidak tersedia, fallback ke CPU")
 
-    root = Path(args.root)
-    exts = (".jpg", ".jpeg", ".png")
-    paths = sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
-    log(f"ditemukan {len(paths)} gambar di {args.root}")
+    # Resolve path
+    dataset_root = resolve_dataset_root(args.dataset_name)
+    out_path     = resolve_out_path(args.out)
+
+    print(f"[LOG] dataset_root : {dataset_root}")
+    print(f"[LOG] out_path     : {out_path}")
+
+    if not dataset_root.exists():
+        print(f"[!] Folder dataset tidak ada: {dataset_root}")
+        return
+
+    # Kumpulkan gambar
+    paths = sorted([str(p) for p in dataset_root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
+    log(f"ditemukan {len(paths)} gambar di {dataset_root}")
     if not paths:
         print("[!] Tidak ada gambar ditemukan."); return
     if args.limit and args.limit > 0:
         paths = paths[:args.limit]
         log(f"MODE UJI: membatasi ke {len(paths)} gambar.")
 
+    # Muat model + aligner
     log(f"load_backbone: source={args.hf_id}")
     model, model_dir = load_backbone(args.hf_id, args.hf_local, device)
 
-    # Muat aligner untuk dapatkan keypoints
     cache_root = Path.home() / ".cvlface_cache"
     aligner = load_aligner(device, cache_root)
 
-    out = Path(args.out)
+    # Proses embedding
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     feats = {}
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
-    rels = [str(Path(p).relative_to(root)).replace("\\", "/") for p in paths]
+    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
 
+    proc = 0
     for i, p in enumerate(tqdm(paths, desc=f"Embedding[CVLface-KPRPE {device}]")):
         img = cv2.imread(p)
-        if img is None: continue
+        if img is None: 
+            continue
         buf_imgs.append(preprocess_arcface(img, 112))
         buf_idx.append(i)
         if len(buf_imgs) == B:
             F = embed_batch(model, aligner, buf_imgs, device)
-            for j, ii in enumerate(buf_idx): feats[rels[ii]] = F[j]
+            for j, ii in enumerate(buf_idx):
+                feats[rels[ii]] = F[j]
+            proc += len(buf_imgs)
             buf_imgs, buf_idx = [], []
 
     if buf_imgs:
         F = embed_batch(model, aligner, buf_imgs, device)
-        for j, ii in enumerate(buf_idx): feats[rels[ii]] = F[j]
+        for j, ii in enumerate(buf_idx):
+            feats[rels[ii]] = F[j]
+        proc += len(buf_imgs)
 
-    np.savez_compressed(out, **feats)
-    log(f"Saved {len(feats)} embeddings -> {out}")
+    np.savez_compressed(out_path, **feats)
+    log(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    log(f"[DONE] processed={proc}/{len(paths)} images")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False
