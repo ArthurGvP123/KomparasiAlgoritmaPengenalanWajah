@@ -133,55 +133,35 @@ Note: Sesuaikan argumen sesuai dengan output yang diinginkan
 
 ---
 
-##### 3a - PERINTAH PROGRAM 03 COSINE UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+##### 3a - PERINTAH PROGRAM 03 UJI IDENTIFIKASI DENGAN COSINE SIMILARITY #####
 
-Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.3
-}
+python 03_evaluasi_performa_cosine.py --embeds-dir ./embeds --fixed-thr 0.3 --outdir eval_verif_cosine
 
-Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.5
-}
+python 03_evaluasi_performa_cosine.py --embeds-dir ./embeds --fixed-thr 0.5 --outdir eval_verif_cosine
 
-Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03_evaluasi_performa_cosine.py --embeds $_.FullName --outdir eval_verif_cosine --fixed-thr 0.7
-}
+python 03_evaluasi_performa_cosine.py --embeds-dir ./embeds --fixed-thr 0.7 --outdir eval_verif_cosine
 
-Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
+Note: Perintah menargetkan seluruh file npz dalam folder embeds. Ubah nilai threshold yang ingin digunakan dalam pengujian
+
+python 03_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --fixed-thr 0.5 --outdir eval_verif_cosine
+
+Note: Perintah menargetkan satu file npz yang dipilih. Ubah nama embedding dan nilai threshold yang ingin digunakan dalam pengujian
 
 ---
 
-##### 3b - PERINTAH PROGRAM 03 COSINE UNTUK SALAH SATU ALGORITMA #####
+##### 3B - PERINTAH PROGRAM 03 UJI IDENTIFIKASI DENGAN EUCLIDEAN DISTANCE #####
 
-python 03A_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
+python 03_evaluasi_performa_euclidean.py --embeds-dir ./embeds --fixed-thr 1.183 --outdir eval_verif_euclidean
 
-Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
+python 03_evaluasi_performa_euclidean.py --embeds-dir ./embeds --fixed-thr 1.000 --outdir eval_verif_euclidean
 
----
+python 03_evaluasi_performa_euclidean.py --embeds-dir ./embeds --fixed-thr 0.775 --outdir eval_verif_euclidean
 
-##### 3c - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SEMUA ALGORITMA YANG TERSEDIA DALAM FOLDER EMBEDS #####
+Note: Perintah menargetkan seluruh file npz dalam folder embeds. Ubah nilai threshold yang ingin digunakan dalam pengujian
 
-Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.3
-}
+python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --fixed-thr 1.0 --outdir eval_verif_euclidean
 
-Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.5
-}
-
-Get-ChildItem .\embeds\*.npz | ForEach-Object {
-  python 03_evaluasi_performa_euclidean.py --embeds $_.FullName --outdir eval_verif_euclidean --fixed-thr 0.7
-}
-
-Note: Ubah nilai threshold yang ingin digunakan dalam pengujian
-
----
-
-##### 3d - PERINTAH PROGRAM 03 EUCLIDEAN UNTUK SALAH SATU ALGORITMA #####
-
-python 03_evaluasi_performa_euclidean.py --embeds .\embeds\embeds_adaface_ir100.npz --outdir eval_verif_cosine --fixed-thr 0.3
-
-Note: Ubah nama file embeds dan nilai threshold yang ingin digunakan dalam pengujian
+Note: Perintah menargetkan satu file npz yang dipilih. Ubah nama embedding dan nilai threshold yang ingin digunakan dalam pengujian
 
 ---
 
@@ -199,4 +179,5 @@ Note: Sesuaikan nama dan direktori file perhitungan metrik
 ##### TAMBAHAN #####
 
 python test_read_npz.py
+
 Note: untuk membaca isi embedding pada file npz
