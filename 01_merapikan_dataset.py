@@ -93,14 +93,25 @@ def main():
     )
     ap.add_argument(
         "--sort", choices=["on", "off", "of"], default="on",
-        help="on  = buat folder gallery (per-ID) & probe (flat, dibatasi --probe-per-id). "
+        help="on  = buat folder gallery (per-ID) & probe (kini juga per-ID). "
              "off/of = hanya align, tanpa struktur gallery/probe."
     )
+
+    # === Mutual exclusive: --probe-per-id vs --gallery-per-id ===
+    # Keduanya opsional. Jika dua-duanya None -> default: probe-per-id = 1 (perilaku lama).
     ap.add_argument(
-        "--probe-per-id", type=int, default=1,
-        help="Maksimal JUMLAH file per-ID yang dimasukkan ke folder 'probe' (flat) saat --sort on. "
-             "Sisa file per-ID masuk ke 'gallery/<ID>/'. Gunakan 0 untuk semua ke gallery."
+        "--probe-per-id", type=int, default=None,
+        help="Maksimal JUMLAH file per-ID ke 'probe/<ID>/' saat --sort on. "
+             "Sisa file per-ID masuk ke 'gallery/<ID>/'. "
+             "Mutually exclusive dgn --gallery-per-id. Gunakan 0 untuk semua ke gallery."
     )
+    ap.add_argument(
+        "--gallery-per-id", type=int, default=None,
+        help="Maksimal JUMLAH file per-ID ke 'gallery/<ID>/' saat --sort on. "
+             "Sisa file per-ID masuk ke 'probe/<ID>/'. "
+             "Mutually exclusive dgn --probe-per-id. Gunakan 0 untuk semua ke probe."
+    )
+
     ap.add_argument(
         "--seed", type=int, default=42,
         help="Seed random untuk pemilihan file. Default: 42"
@@ -112,6 +123,14 @@ def main():
 
     args = ap.parse_args()
     random.seed(args.seed)
+
+    # Validasi eksklusivitas
+    if args.probe_per_id is not None and args.gallery_per_id is not None:
+        sys.exit("[ERROR] --probe-per-id dan --gallery-per-id tidak boleh digunakan bersamaan.")
+
+    # Tetapkan default bila dua-duanya None (pertahankan perilaku lama)
+    if args.probe_per_id is None and args.gallery_per_id is None:
+        args.probe_per_id = 1  # default lama
 
     # Normalisasi nilai sort (terima 'of' sebagai alias 'off')
     sort_mode = "off" if args.sort in ("off", "of") else "on"
@@ -210,21 +229,21 @@ def main():
 
         # Ringkasan
         print("\n=== RINGKASAN ===")
-        print(f"Dataset sumber : {dataset_src}")
-        print(f"Output root    : {out_root}")
-        print(f"Sort          : {sort_mode}")
-        print(f"Size (crop)    : {args.size}x{args.size}")
-        print(f"Seed           : {args.seed}")
-        print(f"Align stat     : {align_stat}")
+        print(f"Dataset sumber  : {dataset_src}")
+        print(f"Output root     : {out_root}")
+        print(f"Sort            : {sort_mode}")
+        print(f"Size (crop)     : {args.size}x{args.size}")
+        print(f"Seed            : {args.seed}")
+        print(f"Align stat      : {align_stat}")
         if debug_errs:
             print("\n[DEBUG] Contoh error (maks 5):")
             for s in debug_errs:
                 print(f" - {s}")
         return
 
-    # --- sort on: buat struktur (probe flat, gallery per-ID) ---
+    # --- sort on: buat struktur (gallery per-ID, probe per-ID) ---
     gallery_dir = out_root / "gallery"
-    probe_dir   = out_root / "probe"   # FLAT (tanpa subfolder ID)
+    probe_dir   = out_root / "probe"    # SEKARANG: per-ID (bukan flat)
     gallery_dir.mkdir(parents=True, exist_ok=True)
     probe_dir.mkdir(parents=True, exist_ok=True)
 
@@ -244,49 +263,74 @@ def main():
     wrote_gallery = 0
     wrote_probe = 0
 
+    # Penentuan mode pembagian
+    mode = "probe-per-id" if (args.probe_per_id is not None) else "gallery-per-id"
+    P = max(0, int(args.probe_per_id)) if args.probe_per_id is not None else None
+    G = max(0, int(args.gallery_per_id)) if args.gallery_per_id is not None else None
+
     # --- Pembagian file ---
     for pid, imgs in id2imgs.items():
         if not imgs:
             continue
         random.shuffle(imgs)
 
-        # PROBE = flat, dibatasi per-ID
-        P = max(0, int(args.probe_per_id))
-        P = min(P, len(imgs))
+        if mode == "probe-per-id":
+            # Maks P file ke PROBE/<ID>/, sisanya ke GALLERY/<ID>/
+            take_p = min(P, len(imgs))
+            probe_choice = imgs[:take_p]
+            rest = imgs[take_p:]
 
-        probe_choice = imgs[:P]       # maksimal P foto ke probe (flat)
-        rest = imgs[P:]               # sisanya ke gallery/<ID>/
+            # PROBE per-ID (label tersimpan di struktur folder)
+            for src_p in probe_choice:
+                dst_p = probe_dir / pid / src_p.name
+                dst_p = ensure_unique_path(dst_p)
+                copy_file(src_p, dst_p)
+                wrote_probe += 1
 
-        # Tulis probe ke folder flat dengan nama aman dan unik
-        for src_p in probe_choice:
-            # prefix dengan ID agar jelas & menghindari tabrakan
-            prefixed_name = f"{pid}__{src_p.name}"
-            safe_name = safe_filename(prefixed_name)
-            dst_p = probe_dir / safe_name
-            dst_p = ensure_unique_path(dst_p)
-            copy_file(src_p, dst_p)
-            wrote_probe += 1
+            # GALLERY per-ID
+            for src_p in rest:
+                dst_p = gallery_dir / pid / src_p.name
+                dst_p = ensure_unique_path(dst_p)
+                copy_file(src_p, dst_p)
+                wrote_gallery += 1
 
-        # Tulis gallery (per-ID)
-        for src_p in rest:
-            dst_p = gallery_dir / pid / src_p.name
-            copy_file(src_p, dst_p)
-            wrote_gallery += 1
+        else:  # mode == "gallery-per-id"
+            # Maks G file ke GALLERY/<ID>/, sisanya ke PROBE/<ID>/
+            take_g = min(G, len(imgs))
+            gallery_choice = imgs[:take_g]
+            rest = imgs[take_g:]
+
+            # GALLERY per-ID
+            for src_p in gallery_choice:
+                dst_p = gallery_dir / pid / src_p.name
+                dst_p = ensure_unique_path(dst_p)
+                copy_file(src_p, dst_p)
+                wrote_gallery += 1
+
+            # PROBE per-ID (label tersimpan di struktur folder)
+            for src_p in rest:
+                dst_p = probe_dir / pid / src_p.name
+                dst_p = ensure_unique_path(dst_p)
+                copy_file(src_p, dst_p)
+                wrote_probe += 1
 
     # Hapus tmp aligned
     shutil.rmtree(tmp_aligned, ignore_errors=True)
 
     # Ringkasan
     print("\n=== RINGKASAN ===")
-    print(f"Dataset sumber : {dataset_src}")
-    print(f"Output root    : {out_root}")
-    print(f"Sort          : {sort_mode}")
-    print(f"Size (crop)    : {args.size}x{args.size}")
-    print(f"Seed           : {args.seed}")
-    print(f"Probe/ID (maks): {args.probe_per_id} file")
-    print(f"Wrote gallery  : {wrote_gallery}")
-    print(f"Wrote probe    : {wrote_probe}")
-    print(f"Align stat     : {align_stat}")
+    print(f"Dataset sumber  : {dataset_src}")
+    print(f"Output root     : {out_root}")
+    print(f"Sort            : {sort_mode}")
+    print(f"Size (crop)     : {args.size}x{args.size}")
+    print(f"Seed            : {args.seed}")
+    if mode == "probe-per-id":
+        print(f"Probe/ID (maks) : {P} file (sisanya -> gallery)")
+    else:
+        print(f"Gallery/ID (maks): {G} file (sisanya -> probe)")
+    print(f"Wrote gallery   : {wrote_gallery}")
+    print(f"Wrote probe     : {wrote_probe}")
+    print(f"Align stat      : {align_stat}")
     if debug_errs:
         print("\n[DEBUG] Contoh error (maks 5):")
         for s in debug_errs:

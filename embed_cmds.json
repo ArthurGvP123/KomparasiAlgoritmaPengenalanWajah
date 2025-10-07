@@ -1,0 +1,62 @@
+{
+  "embeds_adaface_ir100": [
+    "{python}", "02_embed_adaface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_curricularface_ir101": [
+    "{python}", "02_embed_curricularface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_cvlface_vitb_kprpe": [
+    "{python}", "02_embed_cvlface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_dlib": [
+    "{python}", "02_embed_dlib.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_elasticface_ir100": [
+    "{python}", "02_embed_elasticface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_epl_ir100": [
+    "{python}", "02_embed_epl.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_facenet": [
+    "{python}", "02_embed_facenet.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_ghostfacenet_w1p3_s2": [
+    "{python}", "02_embed_ghostfacenets.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_lafs_ir100": [
+    "{python}", "02_embed_lafs.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_lvface_l": [
+    "{python}", "02_embed_lvface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_magface_ir100": [
+    "{python}", "02_embed_magface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ],
+  "embeds_transface_l": [
+    "{python}", "02_embed_transface.py",
+    "--imgdir", "{imagedir}",
+    "--out", "{out}"
+  ]
+}

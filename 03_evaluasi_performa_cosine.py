@@ -6,6 +6,11 @@
 #   - <algo>_results_metrics_thrXX.json
 # CSV agregat semua algoritma: <outdir>/metrics_all_cosine.csv
 #
+# Kompatibel FORMAT EMBED:
+# 1) Baru (tuple/object): value = np.array([feat, label], dtype=object) ATAU (feat,label) dalam array 1-elemen
+# 2) Baru (structured):   value.dtype.fields ada & punya field "feat","label"
+# 3) Lama (vektor saja):  value = np.ndarray 1D vektor fitur (label diambil dari path)
+#
 # Contoh:
 #   python 03_evaluasi_performa_cosine.py --embeds .\embeds\embeds_adaface_ir100.npz --fixed-thr 0.5 --outdir eval_verif_cosine
 #   python 03_evaluasi_performa_cosine.py --embeds-dir .\embeds --fixed-thr 0.5 --outdir eval_verif_cosine
@@ -46,7 +51,7 @@ def l2norm(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 def extract_role_and_id_from_key(k: str) -> Tuple[Optional[str], Optional[str]]:
     """
     role: 'gallery' | 'probe' | None
-    pid : ID jika dapat diekstrak.
+    pid : ID jika dapat diekstrak dari path.
           - gallery/.../<ID>/file -> pid=<ID>
           - probe/.../<ID>/file   -> pid=<ID>
           - probe/file (flat)     -> pid=None
@@ -71,6 +76,80 @@ def extract_role_and_id_from_key(k: str) -> Tuple[Optional[str], Optional[str]]:
             if "." not in nxt.lower():
                 pid = nxt
     return role, pid
+
+def fallback_label_from_path(k: str) -> Optional[str]:
+    """Jika tidak ada label di value, ambil dari path:
+       - prefer segmen setelah 'gallery'/'probe'
+       - jika tidak ada, pakai nama folder induk
+       - fallback terakhir: nama file tanpa ekstensi
+    """
+    kn = _norm_once(k)
+    role, pid = extract_role_and_id_from_key(kn)
+    if pid:
+        return pid
+    parts = kn.split("/")
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(kn).stem
+
+# ---- parser value feat+label (robust untuk 3 format) ----
+def parse_feat_and_label(val, key_for_fallback: str) -> Tuple[np.ndarray, Optional[str]]:
+    """
+    Return: (feat_vector_1D_float64, label_str_or_None)
+    Mendukung:
+      - structured dtype dengan fields {'feat','label'}
+      - array/tuple object berisi [feat, label] (urutan 0=feat, 1=label)
+      - legacy: vektor saja (tanpa label)
+    """
+    # 1) Structured dtype
+    if isinstance(val, np.ndarray) and getattr(val.dtype, "fields", None):
+        names = set(val.dtype.names or [])
+        if "feat" in names and "label" in names:
+            # Bisa shape (1,) atau scalar structured
+            try:
+                feat_field = val["feat"]
+                label_field = val["label"]
+                if feat_field.shape == ():
+                    feat = np.asarray(feat_field, dtype=np.float64).reshape(-1)
+                else:
+                    feat = np.asarray(feat_field[0], dtype=np.float64).reshape(-1)
+                if label_field.shape == ():
+                    label = str(label_field)
+                else:
+                    label = str(label_field[0])
+                return feat, label
+            except Exception:
+                pass  # lanjut ke mode lain bila gagal parsing
+
+    # 2) Array/tuple object: [feat, label] atau ((feat,label),) dst.
+    if isinstance(val, np.ndarray) and val.dtype == object:
+        # kemungkinan langsung [feat, label]
+        if val.ndim == 1 and val.size == 2:
+            feat = np.asarray(val[0], dtype=np.float64).reshape(-1)
+            label = None if val[1] is None else str(val[1])
+            return feat, label
+        # kemungkinan (1,) lalu elemennya tuple/list
+        if val.ndim == 1 and val.size == 1:
+            inner = val[0]
+            if isinstance(inner, (tuple, list)) and len(inner) >= 2:
+                feat = np.asarray(inner[0], dtype=np.float64).reshape(-1)
+                label = None if inner[1] is None else str(inner[1])
+                return feat, label
+
+    # 3) Legacy: vektor saja
+    if isinstance(val, np.ndarray) and val.ndim >= 1 and val.dtype != object:
+        feat = np.asarray(val, dtype=np.float64).reshape(-1)
+        label = None  # ambil dari path nanti bila perlu
+        return feat, label
+
+    # 4) Terakhir, coba treat sebagai (feat,label) tuple langsung
+    if isinstance(val, (tuple, list)) and len(val) >= 2:
+        feat = np.asarray(val[0], dtype=np.float64).reshape(-1)
+        label = None if val[1] is None else str(val[1])
+        return feat, label
+
+    # Gagal total
+    raise ValueError(f"Format value embed tidak dikenali untuk key='{key_for_fallback}' (type={type(val)})")
 
 # ---- metrik helper ----
 def safe_div(num: float, den: float) -> Optional[float]:
@@ -98,6 +177,7 @@ def eval_identification_pipeline(
            true di gallery -> FN
            true tdk di gallery -> TN
     - Probe tanpa label (tak bisa ambil ID) -> diskip
+    - Membaca embed format baru: per-key menyimpan (feat,label)
     """
     outdir_root.mkdir(parents=True, exist_ok=True)
 
@@ -110,25 +190,31 @@ def eval_identification_pipeline(
     metrics_all_csv = outdir_root / "metrics_all_cosine.csv"
 
     # === Load embeddings ===
-    EMB = np.load(str(embeds_path))
+    # allow_pickle=True diperlukan untuk dtype=object (tuple [feat,label])
+    EMB = np.load(str(embeds_path), allow_pickle=True)
     all_keys = list(EMB.keys())
 
-    # Pisahkan GALLERY & PROBE + ambil ID
+    # Pisahkan GALLERY & PROBE + ambil ID dari field "label" (fallback: path)
     gal_id2vecs: Dict[str, List[np.ndarray]] = defaultdict(list)
     probe_items: List[Tuple[str, Optional[str], np.ndarray]] = []  # (key, pid_true, vec)
 
     for k in all_keys:
-        role, pid = extract_role_and_id_from_key(k)
-        vec = EMB[k].astype(np.float64)
-        vec = l2norm(vec)
+        role, pid_from_path = extract_role_and_id_from_key(k)
+
+        feat, lbl = parse_feat_and_label(EMB[k], k)
+        feat = l2norm(feat)
+
+        # jika lbl tak ada, fallback dari path
+        pid = lbl if (lbl is not None and str(lbl).strip() != "") else pid_from_path
 
         if role == "gallery":
             if pid is not None:
-                gal_id2vecs[pid].append(vec)
+                gal_id2vecs[pid].append(feat)
         elif role == "probe":
-            probe_items.append((k, pid, vec))
+            probe_items.append((k, pid, feat))
         else:
-            pass  # abaikan selain gallery/probe
+            # abaikan selain gallery/probe
+            pass
 
     if not gal_id2vecs:
         raise RuntimeError(f"Tidak ada data GALLERY pada embeddings: {embeds_path}")
@@ -159,7 +245,7 @@ def eval_identification_pipeline(
             skipped_unlabeled += 1
             continue
 
-        sims = G @ v  # cosine
+        sims = G @ v  # cosine (karena G & v sudah L2-norm)
         j = int(np.argmax(sims))
         score = float(sims[j])
         pred_id = gal_ids[j]

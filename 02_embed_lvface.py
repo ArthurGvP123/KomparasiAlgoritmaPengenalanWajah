@@ -1,4 +1,10 @@
 # 02_embed_lvface.py
+# LVFace (ONNX / Torch) -> NPZ berisi feat + label per key
+# Key   : path relatif (posix)
+# Value : structured array shape (1,), dtype:
+#         - 'feat'  : float32[emb_dim]
+#         - 'label' : unicode (ID/kelas dari nama folder)
+
 import argparse
 from pathlib import Path
 import os
@@ -41,6 +47,29 @@ def preprocess(img_path: Path, img_size: int = 112):
 def l2norm(x: np.ndarray, eps=1e-12):
     n = np.linalg.norm(x, axis=1, keepdims=True)
     return x / np.maximum(n, eps)
+
+
+def _rel_posix(root: Path, p: Path) -> str:
+    return p.resolve().relative_to(root).as_posix()
+
+
+def _label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - Jika ada 'gallery'/'probe' -> segmen setelahnya (bila bukan nama file)
+      - Jika tidak, gunakan nama folder induk
+      - Fallback: nama file (tanpa ekstensi)
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
 
 
 # ---------------- ONNX path ----------------
@@ -220,12 +249,22 @@ def main():
     if not feats:
         raise RuntimeError("Tidak ada embedding yang dihasilkan.")
 
-    FEAT = np.concatenate(feats, axis=0)
-    key_strs = [k.relative_to(dataset_root).as_posix() for k in keys]
+    FEAT = np.concatenate(feats, axis=0)                 # (N, D)
+    key_strs = [_rel_posix(dataset_root, k) for k in keys]
+    emb_dim = int(FEAT.shape[1])
+    dtype_struct = np.dtype([("feat", np.float32, (emb_dim,)), ("label", "U128")])
 
-    # simpan ke .npz (key->vec)
-    np.savez(out_path, **{k: FEAT[i] for i, k in enumerate(key_strs)})
-    print(f"[OK] embeddings tersimpan: {out_path} | total: {FEAT.shape[0]} | dim: {FEAT.shape[1]}")
+    # Simpan ke .npz: tiap key -> structured array (1,) berisi feat + label
+    out_dict = {}
+    for i, k in enumerate(key_strs):
+        label = _label_from_rel(k)
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec["feat"][0] = FEAT[i].astype(np.float32, copy=False)
+        rec["label"][0] = label
+        out_dict[k] = rec
+
+    np.savez_compressed(out_path, **out_dict)
+    print(f"[OK] embeddings (feat+label) tersimpan: {out_path} | total: {FEAT.shape[0]} | dim: {FEAT.shape[1]}")
 
 
 if __name__ == "__main__":

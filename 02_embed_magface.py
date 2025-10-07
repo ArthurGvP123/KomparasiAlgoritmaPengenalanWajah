@@ -1,4 +1,4 @@
-# 02_embed_magface.py  — seragam CLI & perbaikan non-contiguous (.view) via patch Dropout -> Contiguous
+# 02_embed_magface.py  — NPZ per key: {feat, label} + patch Dropout -> Contiguous
 import os, sys, argparse
 from pathlib import Path
 import numpy as np, cv2, torch
@@ -31,15 +31,9 @@ class _Contiguous(nn.Module):
         return x.contiguous()
 
 def _patch_dropout_contiguous(m: nn.Module) -> int:
-    """
-    Ganti setiap nn.Dropout/nn.Dropout2d menjadi (aslinya) + _Contiguous()
-    atau Identity jika ingin lebih minimal. Di sini kita bungkus agar
-    output dijamin contiguous sebelum baris .view() di forward.
-    """
     replaced = 0
     for name, child in list(m._modules.items()):
         if isinstance(child, (nn.Dropout, nn.Dropout2d)):
-            # di eval, dropout adalah no-op; kita tambahkan kontiguizer
             m._modules[name] = nn.Sequential(child, _Contiguous())
             replaced += 1
         else:
@@ -126,9 +120,27 @@ def list_images(root: Path):
     exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
     return sorted([p for p in root.rglob("*") if p.suffix.lower() in exts])
 
+def _label_from_rel(rel_path: str) -> str:
+    """
+    Label dari path relatif:
+      - Jika mengandung 'gallery' / 'probe' -> segmen setelahnya (bukan nama file)
+      - Jika tidak ada, pakai nama folder induk
+      - Fallback: nama file (tanpa ekstensi)
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
+
 # ---------------- Main ----------------
 def main():
-    ap = argparse.ArgumentParser(description="MagFace embedding (IResNet backbones) – seragam CLI")
+    ap = argparse.ArgumentParser(description="MagFace embedding (IResNet backbones) – seragam CLI, feat+label per key")
     ap.add_argument("--repo-name",    required=True, help="Folder repo MagFace (berisi models/iresnet.py)")
     ap.add_argument("--dataset-name", required=True, help="Folder dataset aligned (mis. .\\dataset\\Dosen_112)")
     ap.add_argument("--weights",      required=True, help="Path .pth MagFace (mis. .\\algoritma\\weights\\magface_ir100_ms1mv2.pth)")
@@ -171,6 +183,15 @@ def main():
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
+    # Sanity check satu sampel (opsional)
+    try:
+        smp = cv2.imread(paths[0]); assert smp is not None
+        smp_pre = preprocess_arcface(smp, 112)
+        smp_feat = embed_batch(model, [smp_pre], args.device)[0]
+        print(f"[LOG] sanity-check: 1 sample feat dim={smp_feat.shape[0]} norm={np.linalg.norm(smp_feat):.6f}")
+    except Exception as e:
+        print(f"[WARN] Sanity-check gagal: {e}")
+
     for i, p in enumerate(tqdm(paths, desc=f"Embedding[MagFace-{args.arch}]")):
         img = cv2.imread(str(p))
         if img is None:
@@ -190,9 +211,23 @@ def main():
             feats[rels[ii]] = F[j]
             mags[rels[ii]]  = float(np.linalg.norm(F[j]))
 
-    # simpan embeddings
-    np.savez_compressed(out_path, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    # ===== Simpan: tiap key -> structured array {feat, label} =====
+    if not feats:
+        print("[!] Tidak ada embedding yang dihasilkan."); return
+    # ambil dimensi dari satu contoh
+    any_vec = next(iter(feats.values()))
+    emb_dim = int(any_vec.shape[-1])
+    dtype_struct = np.dtype([("feat", np.float32, (emb_dim,)), ("label", "U128")])
+
+    out_dict = {}
+    for k, v in feats.items():
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec["feat"][0] = v.astype(np.float32, copy=False)
+        rec["label"][0] = _label_from_rel(k)
+        out_dict[k] = rec
+
+    np.savez_compressed(out_path, **out_dict)
+    print(f"[OK] Saved {len(out_dict)} embeddings (feat+label) -> {out_path}")
 
     # opsional: simpan magnitude
     if args.save_magnitude_csv:

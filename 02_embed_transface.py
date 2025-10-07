@@ -1,4 +1,14 @@
-# 02_embed_transface.py — TransFace embedding (112x112, 512-D) dengan argumen seragam
+# 02_embed_transface.py — TransFace embedding (112x112, 512-D)
+# Output NPZ per key: structured array berisi field:
+#   - feat  : float32[emb_dim]
+#   - label : string (nama ID dari folder)
+#
+# Contoh:
+#   key: "gallery/Alice/img001.jpg" ->
+#       value.dtype = [("feat", "<f4", (512,)), ("label", "<U128")]
+#       value["feat"][0]  -> vektor 512D
+#       value["label"][0] -> "Alice"
+
 import os, sys, argparse
 from pathlib import Path
 import cv2, numpy as np, torch
@@ -43,6 +53,25 @@ def resolve_device(requested: str) -> str:
         log("CUDA tidak tersedia, fallback ke CPU.")
         return "cpu"
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+# ----------------- label helper -----------------
+def _label_from_rel(rel_path: str) -> str:
+    """
+    Label dari path relatif:
+      - Jika mengandung 'gallery' / 'probe' -> segmen setelahnya (bukan nama file)
+      - Jika tidak ada, pakai nama folder induk
+      - Fallback: nama file (tanpa ekstensi)
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
 
 # ----------------- model helpers -----------------
 def build_model(repo_dir: str, network: str):
@@ -109,13 +138,13 @@ def embed_batch(model, batch_imgs, device):
     x = torch.from_numpy(np.stack(batch_imgs)).to(device).float()
     y = model(x)
     if isinstance(y, (tuple, list)): y = y[0]
-    feat = y.detach().cpu().numpy()
+    feat = y.detach().cpu().numpy().astype(np.float32)
     feat = feat / np.maximum(1e-12, np.linalg.norm(feat, axis=1, keepdims=True))
     return feat
 
 # ----------------- main -----------------
 def main():
-    ap = argparse.ArgumentParser(description="Ekstraksi embedding TransFace (112x112, 512-D) — antarmuka seragam")
+    ap = argparse.ArgumentParser(description="Ekstraksi embedding TransFace (112x112, 512-D) — feat+label per key")
     # Argumen seragam:
     ap.add_argument("--repo-name",    required=True, help="Folder repo TransFace yang di-clone (berisi backbones/)")
     ap.add_argument("--dataset-name", required=True, help="Folder dataset aligned (mis. .\\dataset\\Dosen_112)")
@@ -149,7 +178,7 @@ def main():
         paths = paths[:args.limit]
         log(f"MODE UJI: membatasi ke {len(paths)} gambar pertama.")
     if not paths:
-        print(f"[!] Tidak ada gambar di {root}. Pastikan 01_merapikan_dataset sudah menghasilkan crops.")
+        print(f("[!] Tidak ada gambar di {root}. Pastikan 01_merapikan_dataset sudah menghasilkan crops."))
         return
     log(f"ditemukan {len(paths)} gambar.")
 
@@ -162,9 +191,19 @@ def main():
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
+    # Opsional sanity check satu sampel
+    try:
+        smp = cv2.imread(paths[0]); assert smp is not None
+        smp_pre = preprocess_transface(smp, 112)
+        smp_feat = embed_batch(model, [smp_pre], device)[0]
+        log(f"sanity-check: dim={smp_feat.shape[0]} norm={np.linalg.norm(smp_feat):.6f}")
+    except Exception as e:
+        log(f"[WARN] Sanity-check gagal: {e}")
+
     for i, p in enumerate(tqdm(paths, desc=f"Embedding[TransFace-{canonicalize_name(args.network)}]")):
         img = cv2.imread(p)
-        if img is None: continue
+        if img is None: 
+            continue
         buf_imgs.append(preprocess_transface(img, size=112))
         buf_idx.append(i)
         if len(buf_imgs) == B:
@@ -178,10 +217,26 @@ def main():
         for j, ii in enumerate(buf_idx):
             feats[rels[ii]] = F[j]
 
+    # ===== Simpan: tiap key -> structured array {feat, label} =====
     out = Path(args.out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out}")
+
+    if not feats:
+        print("[!] Tidak ada embedding yang dihasilkan."); return
+
+    any_vec = next(iter(feats.values()))
+    emb_dim = int(any_vec.shape[-1])
+    dtype_struct = np.dtype([("feat", np.float32, (emb_dim,)), ("label", "U128")])
+
+    out_dict = {}
+    for k, v in feats.items():
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec["feat"][0] = v.astype(np.float32, copy=False)
+        rec["label"][0] = _label_from_rel(k)
+        out_dict[k] = rec
+
+    np.savez_compressed(out, **out_dict)
+    print(f"[OK] Saved {len(out_dict)} embeddings (feat+label) -> {out}")
 
 if __name__ == "__main__":
     # Optimasi kecil untuk CPU

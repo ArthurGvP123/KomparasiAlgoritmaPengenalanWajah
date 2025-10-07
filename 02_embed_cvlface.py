@@ -1,4 +1,4 @@
-# 02_embed_cvlface.py — CVLface ViT-KPRPE (HF) dengan interface seragam (dataset-name & out)
+# 02_embed_cvlface.py — CVLface ViT-KPRPE (HF) simpan label di DALAM NPZ per-key (structured array: feat + label)
 import os
 import sys
 import argparse
@@ -266,6 +266,29 @@ def load_aligner(device: str, cache_root: Path) -> torch.nn.Module:
     return aligner
 
 
+# ======== Label helpers ========
+def path_to_rel(root: Path, abs_path: str) -> str:
+    return str(Path(abs_path).resolve().relative_to(root).as_posix())
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - jika ada 'gallery'/'probe', pakai segmen setelahnya (bila bukan nama file)
+      - jika tidak ada, gunakan nama folder induk
+      - fallback: stem nama file
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
+
+
 # ======== Main ========
 def main():
     ap = argparse.ArgumentParser(
@@ -320,22 +343,29 @@ def main():
     cache_root = Path.home() / ".cvlface_cache"
     aligner = load_aligner(device, cache_root)
 
-    # Proses embedding
+    # Proses embedding (feat + label)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     feats = {}
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
-    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
+    rels   = [path_to_rel(dataset_root, p) for p in paths]
+    labels = [label_from_rel(rp) for rp in rels]
+    max_label_len = max(1, max(len(s) for s in labels)) if labels else 32
 
+    emb_dim = None
     proc = 0
+
     for i, p in enumerate(tqdm(paths, desc=f"Embedding[CVLface-KPRPE {device}]")):
         img = cv2.imread(p)
-        if img is None: 
+        if img is None:
             continue
         buf_imgs.append(preprocess_arcface(img, 112))
         buf_idx.append(i)
         if len(buf_imgs) == B:
             F = embed_batch(model, aligner, buf_imgs, device)
+            if emb_dim is None:
+                emb_dim = int(F.shape[1])
+                log(f"embedding dim = {emb_dim}")
             for j, ii in enumerate(buf_idx):
                 feats[rels[ii]] = F[j]
             proc += len(buf_imgs)
@@ -343,12 +373,30 @@ def main():
 
     if buf_imgs:
         F = embed_batch(model, aligner, buf_imgs, device)
+        if emb_dim is None:
+            emb_dim = int(F.shape[1])
+            log(f"embedding dim = {emb_dim}")
         for j, ii in enumerate(buf_idx):
             feats[rels[ii]] = F[j]
         proc += len(buf_imgs)
 
-    np.savez_compressed(out_path, **feats)
-    log(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    if emb_dim is None:
+        print("[!] Tidak ada embedding yang berhasil dibuat.")
+        return
+
+    # Simpan ke NPZ: tiap key = array terstruktur (1,) dengan fields ('feat', float32[emb_dim]), ('label', 'U{max_label_len}')
+    dtype_struct = np.dtype([('feat', np.float32, (emb_dim,)), ('label', f'U{max_label_len}')])
+    to_save = {}
+    for rp, vec in feats.items():
+        lbl = label_from_rel(rp)
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec['feat'][0]  = vec.astype(np.float32, copy=False)
+        rec['label'][0] = lbl
+        to_save[rp] = rec
+
+    np.savez_compressed(out_path, **to_save)
+    log(f"[OK] Saved {len(to_save)} records (feat+label per key) -> {out_path}")
+    log("[NOTE] Format baru: EMB[key] adalah array terstruktur shape (1,) dengan fields: 'feat' & 'label'.")
     log(f"[DONE] processed={proc}/{len(paths)} images")
 
 if __name__ == "__main__":

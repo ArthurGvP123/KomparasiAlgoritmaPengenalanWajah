@@ -1,7 +1,7 @@
-# 02_embed_dlib.py — Dlib 128D embeddings (CPU), kompatibel pipeline .npz
-# Versi dengan argumen konsisten:
-#   --dataset-name "./dataset/XYZ_112"
-#   --out "./embeds/embeds_dlib.npz"
+# 02_embed_dlib.py — Dlib 128D embeddings (CPU), simpan label DI DALAM NPZ (structured array: feat + label)
+# Argumen konsisten:
+#   --dataset-name "./dataset/Dosen_150"
+#   --out          "./embeds/embeds_dlib.npz"
 #   --weights-recog "./algoritma/weights/dlib_face_recognition_resnet_model_v1.dat"
 #   --weights-sp5   "./algoritma/weights/shape_predictor_5_face_landmarks.dat"
 # (Opsional) --repo-name "./algoritma/dlib"  --> diabaikan (hanya untuk konsistensi CLI)
@@ -60,9 +60,31 @@ def embed_one(img_path: Path, facerec, sp5, chip_size: int = 150) -> np.ndarray:
 def find_images(root: Path):
     return [p for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT]
 
+# ===== Label helper (seragam dgn skrip lain) =====
+def path_to_rel(root: Path, abs_path: Path) -> str:
+    return abs_path.resolve().relative_to(root).as_posix()
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - jika ada 'gallery'/'probe', pakai segmen setelahnya (jika bukan nama file)
+      - jika tidak ada, gunakan nama folder induk
+      - fallback: stem nama file
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Ekstraksi embedding Dlib (128D) ke .npz dengan argumen konsisten."
+        description="Ekstraksi embedding Dlib (128D) ke .npz (feat+label per key) dengan argumen konsisten."
     )
     # === Argumen baru yang konsisten ===
     ap.add_argument("--repo-name", default="", help="(Opsional, diabaikan) path repo dlib; hanya untuk konsistensi CLI.")
@@ -88,8 +110,8 @@ def main():
     dataset_root = Path(args.dataset_name).resolve()
     out_path = Path(args.out).resolve()
 
-    print(f"[LOG] dataset_root: {dataset_root}")
-    print(f"[LOG] out         : {out_path}")
+    print(f"[LOG] dataset_root : {dataset_root}")
+    print(f"[LOG] out          : {out_path}")
     print(f"[LOG] weights-recog: {args.weights_recog}")
     print(f"[LOG] weights-sp5  : {args.weights_sp5}")
     if args.repo_name:
@@ -108,9 +130,15 @@ def main():
         imgs = imgs[:args.limit]
         print(f"[LOG] MODE UJI: membatasi ke {len(imgs)} gambar pertama.")
 
-    keys = []
-    vecs = []
+    # Proses
+    records = {}       # key -> structured array (1,) dgn fields ('feat','label')
     skipped = 0
+    emb_dim = 128      # Dlib: 128D
+
+    # Siapkan dtype untuk structured array (label panjang dinamis -> estimasi praktis)
+    # Kita ambil label saat loop pertama untuk mengetahui max length, namun agar simpel dan aman,
+    # set panjang maksimum 128 karakter—cukup untuk nama folder umum.
+    dtype_struct = np.dtype([('feat', np.float32, (emb_dim,)), ('label', 'U128')])
 
     for p in tqdm(imgs, desc="Embedding[Dlib]"):
         try:
@@ -121,21 +149,23 @@ def main():
             skipped += 1
             continue
 
-        # simpan key sebagai relpath terhadap dataset_root (pakai slash)
-        key = p.relative_to(dataset_root).as_posix()
-        keys.append(key)
-        vecs.append(v)
+        rel = path_to_rel(dataset_root, p)
+        lbl = label_from_rel(rel)
 
-    if len(keys) == 0:
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec['feat'][0]  = v.astype(np.float32, copy=False)
+        rec['label'][0] = lbl
+        records[rel] = rec
+
+    if len(records) == 0:
         raise RuntimeError("Tidak ada embedding yang berhasil dihitung.")
 
-    # Tulis ke .npz (kunci=relpath, value=vector float32)
+    # Tulis ke .npz (kunci=relpath, value=structured array feat+label)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    save_dict = {k: np.array(v, dtype=np.float32) for k, v in zip(keys, vecs)}
-    np.savez_compressed(out_path, **save_dict)
+    np.savez_compressed(out_path, **records)
 
     print(f"[OK] Selesai. Disimpan: {out_path}")
-    print(f"[STAT] embedded={len(keys)} | skipped={skipped}")
+    print(f"[STAT] embedded={len(records)} | skipped={skipped}")
 
 if __name__ == "__main__":
     main()

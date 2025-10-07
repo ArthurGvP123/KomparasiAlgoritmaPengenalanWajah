@@ -1,7 +1,7 @@
 import numpy as np
 
 # Ganti 'data.npz' dengan nama file NPZ kamu
-file_npz = r".\embeds\embeds_adaface_ir100.npz"
+file_npz = r".\embeds\embeds_curricularface_ir101.npz"
 
 # Membaca file .npz
 data = np.load(file_npz)
@@ -9,8 +9,9 @@ data = np.load(file_npz)
 # Menampilkan nama-nama array yang ada di dalam file
 print("Daftar array di dalam file:")
 print(data.files)
+# print("="*20)
 
-print(data["probe/kevin/x0ksp4w5bqN0H3AJqjPavsv.jpg"])
+print(data["gallery/Arlinto/2025-04-25.jpg"])
 
 # for name in data.files:
 #     print(f"\nIsi array '{name}':")

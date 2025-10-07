@@ -1,5 +1,11 @@
 # 02_embed_lafs.py
-# LAFS embedding with IResNet backbone (IR-100 / IR-50), streaming NPZ writer
+# LAFS embedding with IResNet backbone (IR-100 / IR-50), NPZ berisi feat + label per key
+# Output NPZ:
+#   key   : path relatif (posix)
+#   value : structured array shape (1,) dtypes:
+#           - 'feat'  : float32[emb_dim]
+#           - 'label' : unicode (ID/kelas dari nama folder)
+
 import os, sys, argparse, zipfile
 from io import BytesIO
 from pathlib import Path
@@ -117,6 +123,8 @@ def iresnet100(**kwargs): return IResNet(IBasicBlock, [3, 13, 30, 3], **kwargs)
 # --------------------------
 def log(*a): print("[LOG]", *a)
 
+SUPPORTED_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+
 def preprocess_arcface(img_bgr, size=112):
     img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     if img.shape[:2] != (size, size):
@@ -143,9 +151,41 @@ def embed_batch(model, batch_imgs, device):
 def _zip_compression(use_compress: bool):
     return zipfile.ZIP_DEFLATED if use_compress else zipfile.ZIP_STORED
 
-def _write_vec_to_npz(zf: zipfile.ZipFile, key: str, vec: np.ndarray):
-    buf = BytesIO(); np.save(buf, vec)
+def _write_record_to_npz(zf: zipfile.ZipFile, key: str, feat: np.ndarray, label: str, dtype_struct: np.dtype):
+    """
+    Tulis satu entry .npy (structured array shape (1,)) ke dalam ZIP.
+    Ini membuat arsip .npz valid (zip berisi berkas .npy).
+    """
+    rec = np.empty((1,), dtype=dtype_struct)
+    rec["feat"][0]  = feat.astype(np.float32, copy=False)
+    rec["label"][0] = label
+    buf = BytesIO()
+    np.save(buf, rec)
     zf.writestr(f"{key}.npy", buf.getvalue())
+
+def _list_images(root: Path):
+    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
+
+def _rel_posix(root: Path, p: Path) -> str:
+    return p.resolve().relative_to(root).as_posix()
+
+def _label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - Jika ada 'gallery'/'probe' -> segmen setelahnya (bila bukan nama file)
+      - Jika tidak, gunakan nama folder induk
+      - Fallback: nama file (tanpa ekstensi)
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
 
 def build_model(arch: str):
     arch = arch.lower()
@@ -191,18 +231,14 @@ def load_backbone(weight_path: str, arch: str, device: str):
     model.eval().to(device).float()
     return model
 
-def _list_images(root: Path):
-    exts = (".jpg",".jpeg",".png")
-    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
-
 def main():
-    ap = argparse.ArgumentParser(description="LAFS embedding (IResNet backbone) – streaming NPZ")
-    # Argumen seragam (disamakan dengan skrip lain)
+    ap = argparse.ArgumentParser(description="LAFS embedding (IResNet backbone) – simpan NPZ feat+label per key")
+    # Argumen seragam
     ap.add_argument("--repo-name", default="", help="Folder repo LAFS (opsional, tidak wajib dipakai)")
     ap.add_argument("--dataset-name", required=True, help="Folder dataset aligned (mis. .\\dataset\\Dosen_112)")
     ap.add_argument("--weights", required=True, help="Path checkpoint LAFS (.pth/.pt)")
     ap.add_argument("--arch", default="ir100", choices=["ir100","ir50"], help="Backbone yang cocok")
-    ap.add_argument("--out", required=True, help="Path output .npz (atau zip npy)")
+    ap.add_argument("--out", required=True, help="Path output .npz")
 
     # Lainnya
     ap.add_argument("--batch",  type=int, default=128)
@@ -234,28 +270,48 @@ def main():
     log(f"load_backbone: {args.arch} | weights={args.weights}")
     model = load_backbone(args.weights, args.arch, device)
 
+    # Siapkan ZIP (.npz) writer
     comp = _zip_compression(not args.no_compress)
-    rels = [str(Path(p).relative_to(dataset_root)).replace("\\","/") for p in paths]
+    rels = [_rel_posix(dataset_root, Path(p)) for p in paths]
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
+    # dtype_struct akan ditentukan dinamis saat batch pertama (ambil emb_dim dari hasil model)
+    dtype_struct = None
+
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(str(out), mode="w", compression=comp, allowZip64=True) as zf:
+        # Proses batch
         for i, p in enumerate(tqdm(paths, desc=f"Embedding[LAFS-{args.arch} {device}]")):
             img = cv2.imread(p)
-            if img is None: continue
-            buf_imgs.append(preprocess_arcface(img, 112)); buf_idx.append(i)
+            if img is None: 
+                continue
+            buf_imgs.append(preprocess_arcface(img, 112))
+            buf_idx.append(i)
+
             if len(buf_imgs) == B:
-                F = embed_batch(model, buf_imgs, device)
+                F = embed_batch(model, buf_imgs, device)  # (N, D)
+                if dtype_struct is None:
+                    emb_dim = int(F.shape[1])
+                    dtype_struct = np.dtype([("feat", np.float32, (emb_dim,)), ("label", "U128")])
                 for j, ii in enumerate(buf_idx):
-                    _write_vec_to_npz(zf, rels[ii], F[j])
+                    key = rels[ii]
+                    label = _label_from_rel(key)
+                    _write_record_to_npz(zf, key, F[j], label, dtype_struct)
                 buf_imgs.clear(); buf_idx.clear()
+
+        # Sisa buffer
         if buf_imgs:
             F = embed_batch(model, buf_imgs, device)
+            if dtype_struct is None:
+                emb_dim = int(F.shape[1])
+                dtype_struct = np.dtype([("feat", np.float32, (emb_dim,)), ("label", "U128")])
             for j, ii in enumerate(buf_idx):
-                _write_vec_to_npz(zf, rels[ii], F[j])
+                key = rels[ii]
+                label = _label_from_rel(key)
+                _write_record_to_npz(zf, key, F[j], label, dtype_struct)
 
-    log(f"[OK] Saved embeddings -> {out}")
+    log(f"[OK] Saved embeddings (feat+label) -> {out}")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False

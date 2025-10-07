@@ -1,4 +1,4 @@
-# 02_embed_curricularface.py — fleksibel path/name sesuai layout proyek
+# 02_embed_curricularface.py — simpan label di DALAM NPZ per-key (structured array: feat + label)
 import os, sys, argparse, traceback, time, importlib
 from pathlib import Path
 import cv2, numpy as np, torch
@@ -171,10 +171,31 @@ def embed_batch(model, batch_imgs, device):
 def collect_images(root: Path):
     return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
 
+def path_to_rel(root: Path, abs_path: str) -> str:
+    return str(Path(abs_path).resolve().relative_to(root).as_posix())
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - jika ada 'gallery'/'probe', ambil segmen setelahnya (bila bukan nama file)
+      - jika tidak ada, pakai nama folder induk
+      - fallback: nama file (stem)
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
+
 # ---------- Main ----------
 def main():
     t0 = time.time()
-    print("== CurricularFace Embedding (project-layout, flexible args) ==")
+    print("== CurricularFace Embedding (feat + label tersimpan di NPZ per-key) ==")
 
     ap = argparse.ArgumentParser()
     # argumen fleksibel (nama atau path)
@@ -223,8 +244,12 @@ def main():
         paths = paths[:args.limit]
         print(f"[LOG] MODE UJI: {len(paths)} gambar pertama.")
 
-    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
+    rels   = [path_to_rel(dataset_root, p) for p in paths]
+    labels = [label_from_rel(rp) for rp in rels]
+    max_label_len = max(1, max(len(s) for s in labels))
+
     feats = {}
+    emb_dim = None
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
@@ -238,6 +263,9 @@ def main():
         buf_idx.append(i)
         if len(buf_imgs) == B:
             F = embed_batch(model, buf_imgs, args.device)
+            if emb_dim is None:
+                emb_dim = int(F.shape[1])
+                print(f"[LOG] embedding dim = {emb_dim}")
             for j, ii in enumerate(buf_idx):
                 feats[rels[ii]] = F[j]
             proc += len(buf_imgs)
@@ -245,14 +273,31 @@ def main():
 
     if buf_imgs:
         F = embed_batch(model, buf_imgs, args.device)
+        if emb_dim is None:
+            emb_dim = int(F.shape[1])
+            print(f"[LOG] embedding dim = {emb_dim}")
         for j, ii in enumerate(buf_idx):
             feats[rels[ii]] = F[j]
         proc += len(buf_imgs)
 
-    # 4) Simpan
+    if emb_dim is None:
+        print("[!] Tidak ada embedding yang berhasil dibuat.")
+        return
+
+    # 4) Simpan ke NPZ: tiap key = array terstruktur (1,) dengan fields ('feat', float32[emb_dim]), ('label', 'U{max_label_len}')
+    dtype_struct = np.dtype([('feat', np.float32, (emb_dim,)), ('label', f'U{max_label_len}')])
+    to_save = {}
+    for rp, vec in feats.items():
+        lbl = label_from_rel(rp)
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec['feat'][0]  = vec.astype(np.float32, copy=False)
+        rec['label'][0] = lbl
+        to_save[rp] = rec
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_path, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    np.savez_compressed(out_path, **to_save)
+    print(f"[OK] Saved {len(to_save)} records (feat+label per key) -> {out_path}")
+    print("[NOTE] Format baru: EMB[key] adalah array terstruktur shape (1,) dengan fields: 'feat' & 'label'.")
 
     dt = time.time() - t0
     print(f"[DONE] processed={proc}/{len(paths)} images in {dt:.2f}s")

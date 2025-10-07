@@ -1,5 +1,5 @@
-# 02_embed_adaface.py — AdaFace embedding (path-aware for project layout, flexible args)
-import os, sys, argparse, traceback, time, importlib
+# 02_embed_adaface.py — AdaFace embedding + label disimpan DALAM NPZ per-key (structured array)
+import os, sys, argparse, traceback, time, importlib, csv, json
 from pathlib import Path
 import numpy as np
 import cv2, torch
@@ -20,8 +20,7 @@ def add_repo_to_sys_path(repo_dir: Path):
     repo = repo_dir.resolve()
     if not repo.exists():
         raise FileNotFoundError(f"[!] AdaFace repo tidak ditemukan: {repo}")
-    # taruh paling depan agar modul 'net' dari repo ini yang ter-load
-    sys.path.insert(0, str(repo))
+    sys.path.insert(0, str(repo))  # pastikan modul repo ini yang ter-load
 
 def import_net_and_models(adaface_repo: Path):
     add_repo_to_sys_path(adaface_repo)
@@ -32,7 +31,6 @@ def import_net_and_models(adaface_repo: Path):
     return net, IR_50, IR_101
 
 def normalize_arch_name(arch_raw: str) -> str:
-    """Terima variasi input arch dan normalisasi ke 'ir50' atau 'ir101'."""
     a = arch_raw.strip().lower().replace("_", "")
     if a in {"ir50", "irse50"}:
         return "ir50"
@@ -57,7 +55,6 @@ class SafeFlatten(nn.Module):
         return x.reshape(x.size(0), -1)
 
 def replace_flatten_with_safe(model: nn.Module):
-    """Ganti submodule bernama/bertipe Flatten -> SafeFlatten (aman utk tensor non-contiguous)."""
     replaced = 0
     for name, child in list(model.named_children()):
         if child.__class__.__name__ == "Flatten":
@@ -68,28 +65,17 @@ def replace_flatten_with_safe(model: nn.Module):
     return replaced
 
 def resolve_under_project_or_base(arg: str, base_dir: Path) -> Path:
-    """
-    Terima 'arg' sebagai path penuh/relatif atau hanya 'nama'.
-    Urutan cek:
-      1) arg sebagai absolute path
-      2) PROJECT_ROOT/arg (relatif ke root proyek)
-      3) base_dir/arg (mis. algoritma/<repo_name> atau dataset/<name>)
-    """
     p = Path(arg)
     if p.is_absolute() and p.exists():
         return p
-    # relatif dari current working dir
     if p.exists():
         return p.resolve()
-    # relatif ke PROJECT_ROOT
     pp = (PROJECT_ROOT / p)
     if pp.exists():
         return pp.resolve()
-    # fallback di bawah base_dir
     pb = (base_dir / p)
     if pb.exists():
         return pb.resolve()
-    # jika belum ada, tetap kembalikan pb (biar error-nya jelas)
     return pb
 
 def resolve_repo_dir(arg_repo: str) -> Path:
@@ -99,8 +85,6 @@ def resolve_dataset_root(arg_dataset: str) -> Path:
     return resolve_under_project_or_base(arg_dataset, DATASETS_DIR)
 
 def resolve_weights_path(weight_arg: str) -> Path:
-    """Jika argumen adalah path yang exist, pakai itu.
-    Jika hanya nama file, coba di .\\algoritma\\weights\\<nama>."""
     p = Path(weight_arg)
     if p.is_absolute() and p.exists():
         return p
@@ -118,23 +102,14 @@ def resolve_weights_path(weight_arg: str) -> Path:
     )
 
 def resolve_out_path(out_arg: str) -> Path:
-    """
-    Aturan:
-      - Jika absolut -> pakai apa adanya.
-      - Jika relatif tanpa folder (hanya nama file) -> simpan ke EMBEDS_DIR/<nama>.
-      - Jika relatif DENGAN folder (mis. 'embeds/xxx.npz' atau '.\\embeds\\xxx.npz') -> PROJECT_ROOT/<relatif>.
-    """
     p = Path(out_arg)
     if p.is_absolute():
         return p
-    # contoh: hanya "embeds_adaface_ir101.npz" -> taruh ke EMBEDS_DIR
     if p.parent == Path("."):
-        return (EMBEDS_DIR / p.name)
-    # contoh: ".\\embeds\\embeds_adaface_ir101.npz" atau "some/dir/out.npz"
+        return (EMBEDS_DIR / p.name)  # hanya nama file -> simpan ke ./embeds
     return (PROJECT_ROOT / p)
 
 def preprocess_bgr_adaface(img_bgr, size=112):
-    # BGR -> CHW float32, normalize [-1,1], resize ke 112x112 jika perlu
     if img_bgr.shape[:2] != (size, size):
         img_bgr = cv2.resize(img_bgr, (size, size), interpolation=cv2.INTER_LINEAR)
     img = img_bgr.astype(np.float32) / 255.0
@@ -149,40 +124,59 @@ def embed_batch(model, batch_imgs, device):
     if isinstance(y, (tuple, list)):
         y = y[0]
     feat = y.detach().cpu().numpy()
-    # normalisasi L2 ke unit vector (penting utk cosine)
+    # normalisasi L2 (umum utk face embeddings)
     feat = feat / np.clip(np.linalg.norm(feat, axis=1, keepdims=True), 1e-12, None)
     return feat
 
 def collect_images(root: Path):
     return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
 
+def path_to_rel(root: Path, abs_path: str) -> str:
+    return str(Path(abs_path).resolve().relative_to(root).as_posix())
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - jika ada 'gallery'/'probe', ambil segmen setelahnya (bila bukan nama file)
+      - jika tidak ada, pakai nama folder induk
+      - fallback: nama file (stem)
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
+
 def main():
     t0 = time.time()
-    print("== AdaFace Embedding (project-layout, flexible args) ==")
+    print("== AdaFace Embedding (NPZ per-key: feat + label) ==")
 
     ap = argparse.ArgumentParser()
-    # --- argumen fleksibel: bisa 'nama' atau 'path'
     ap.add_argument("--repo-name", required=True,
-                    help="Nama folder repo di .\\algoritma (mis. 'AdaFace') ATAU path langsung (mis. '.\\algoritma\\AdaFace').")
+        help="Nama folder repo di .\\algoritma (mis. 'AdaFace') ATAU path langsung (mis. '.\\algoritma\\AdaFace').")
     ap.add_argument("--dataset-name", required=True,
-                    help="Nama folder dataset di .\\dataset (mis. 'Dosen_112') ATAU path langsung (mis. '.\\dataset\\Dosen_112').")
+        help="Nama folder dataset di .\\dataset (mis. 'Dosen_112') ATAU path langsung (mis. '.\\dataset\\Dosen_112').")
     ap.add_argument("--weights", required=True,
-                    help="Nama file weights di .\\algoritma\\weights atau path langsung ke file .pth/.ckpt")
+        help="Nama file weights di .\\algoritma\\weights atau path penuh ke .pth/.ckpt")
 
     # --- argumen tetap
-    ap.add_argument("--arch", default="ir101",
-                    help="Arsitektur backbone (contoh: ir50, ir101). Alias 'ir100' akan dipetakan ke ir101.")
-    ap.add_argument("--out", default="embeds_adaface_ir101.npz",
-                    help="Nama file output .npz. Boleh hanya nama file atau path (relatif/absolut).")
-    ap.add_argument("--batch", type=int, default=128, help="Ukuran batch embedding.")
+    ap.add_argument("--arch", default="ir101", help="ir50 / ir101 (alias ir100->ir101).")
+    ap.add_argument("--out",  default="embeds_adaface_ir101.npz",
+        help="Nama file .npz output (boleh relatif/absolut).")
+    ap.add_argument("--batch", type=int, default=128, help="Batch size.")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
-                    help="cpu/cuda (default otomatis).")
-    ap.add_argument("--limit", type=int, default=0, help="Batas jumlah gambar utk uji (0=semua).")
-    ap.add_argument("--save-magnitude-csv", default="",
-                    help="(Opsional) Nama file CSV magnitudo fitur; kosongkan untuk skip.")
+        help="cpu / cuda")
+    ap.add_argument("--limit", type=int, default=0, help="Batas jumlah gambar (0=semua).")
+    ap.add_argument("--save-magnitude-csv", default="", help="Opsional: simpan magnitudo fitur ke CSV.")
+
     args = ap.parse_args()
 
-    # --- Resolve path utama sesuai aturan fleksibel
+    # Resolve path
     repo_dir     = resolve_repo_dir(args.repo_name)
     dataset_root = resolve_dataset_root(args.dataset_name)
     weights_path = resolve_weights_path(args.weights)
@@ -197,7 +191,6 @@ def main():
             mpath = (PROJECT_ROOT / mpath) if not mpath.is_absolute() else mpath
         mag_csv_path = mpath
 
-    # --- Logging awal
     print(f"[LOG] repo_dir     : {repo_dir}")
     print(f"[LOG] dataset_root : {dataset_root}")
     print(f"[LOG] weights_path : {weights_path}")
@@ -205,7 +198,7 @@ def main():
     if mag_csv_path:
         print(f"[LOG] mag_csv_path : {mag_csv_path}")
 
-    # --- Validasi dataset
+    # Validasi dataset
     if not dataset_root.exists():
         print(f"[!] Folder dataset tidak ada: {dataset_root}")
         return
@@ -218,7 +211,7 @@ def main():
         paths = paths[:args.limit]
         print(f"[LOG] MODE UJI: {len(paths)} gambar pertama.")
 
-    # --- Build model & muat bobot
+    # Build model + load weights
     model, net, arch_norm = build_model(repo_dir, args.arch)
     if args.arch.strip().lower().replace("_", "") == "ir100":
         print("[WARN] AdaFace tidak menyediakan 'ir100'; dipetakan ke 'ir101'.")
@@ -231,7 +224,6 @@ def main():
     except TypeError:
         ckpt = torch.load(str(weights_path), map_location="cpu")
 
-    # Ambil state_dict dari berbagai format
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
         sd = ckpt["state_dict"]
     elif isinstance(ckpt, dict):
@@ -239,7 +231,6 @@ def main():
     else:
         sd = {}
 
-    # Bersihkan prefix umum
     PREFIXES = (
         "features.module.", "module.features.", "features.",
         "module.", "model.", "backbone.", "net.", "encoder."
@@ -264,25 +255,31 @@ def main():
     missing, unexpected = model.load_state_dict(to_load, strict=False)
     print(f"[Info] Loaded params: {len(to_load)} | missing={len(missing)} | unexpected={len(unexpected)}")
     if skipped:
-        print("[Info] Skipped (shape mismatch / not in model), contoh <=10:")
+        print("[Info] Skipped (contoh <=10):")
         for i, (k, shp_v, shp_m) in enumerate(skipped[:10], 1):
             print(f"  {i:02d}. {k}: ckpt{shp_v} vs model{shp_m}")
 
     model.eval().to(args.device).float()
     print(f"[LOG] device: {args.device}")
 
+    # --- Siapkan relpath & label (agar bisa tentukan panjang maksimum label)
+    rels = [path_to_rel(dataset_root, p) for p in paths]
+    labels = [label_from_rel(rp) for rp in rels]
+    max_label_len = max(1, max(len(s) for s in labels))
+
     # --- Embed
-    rels = [str(Path(p).relative_to(dataset_root)).replace("\\","/") for p in paths]
-    feats, mags = {}, {}
+    feats = {}
+    mags  = {}
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
-    # Sanity-check satu sampel
+    # sanity check
     try:
         sample = cv2.imread(paths[0]); assert sample is not None
         s_pre = preprocess_bgr_adaface(sample, 112)
         s_feat = embed_batch(model, [s_pre], args.device)[0]
-        print(f"[LOG] sanity-check: 1 sample embed shape={s_feat.shape}, norm={np.linalg.norm(s_feat):.6f}")
+        emb_dim = int(s_feat.shape[0])
+        print(f"[LOG] sanity-check: dim={emb_dim}, norm={np.linalg.norm(s_feat):.6f}")
     except Exception as e:
         print("[ERR] sanity-check gagal:")
         print("".join(traceback.format_exception(type(e), e, e.__traceback__)))
@@ -298,23 +295,36 @@ def main():
         if len(buf_imgs) == B:
             F = embed_batch(model, buf_imgs, args.device)
             for j, ii in enumerate(buf_idx):
-                feats[rels[ii]] = F[j]
-                mags[rels[ii]]  = float(np.linalg.norm(F[j]))
+                rp = rels[ii]
+                feats[rp] = F[j]
+                mags[rp]  = float(np.linalg.norm(F[j]))
             proc += len(buf_imgs)
             buf_imgs, buf_idx = [], []
 
     if buf_imgs:
         F = embed_batch(model, buf_imgs, args.device)
         for j, ii in enumerate(buf_idx):
-            feats[rels[ii]] = F[j]
-            mags[rels[ii]]  = float(np.linalg.norm(F[j]))
+            rp = rels[ii]
+            feats[rp] = F[j]
+            mags[rp]  = float(np.linalg.norm(F[j]))
         proc += len(buf_imgs)
 
-    # --- Simpan
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_path, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    # --- Susun structured array per-key: fields = ('feat', float32[emb_dim]), ('label', 'U<max_label_len>')
+    dtype_struct = np.dtype([('feat', np.float32, (emb_dim,)), ('label', f'U{max_label_len}')])
+    to_save = {}
+    for rp, vec in feats.items():
+        lbl = label_from_rel(rp)
+        rec = np.empty((1,), dtype=dtype_struct)
+        rec['feat'][0] = vec.astype(np.float32, copy=False)
+        rec['label'][0] = lbl
+        to_save[rp] = rec
 
+    # --- Simpan NPZ
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out_path, **to_save)
+    print(f"[OK] Saved {len(to_save)} records (feat+label per key) -> {out_path}")
+
+    # (Opsional) simpan magnitudo
     if mag_csv_path and len(mags):
         mag_csv_path.parent.mkdir(parents=True, exist_ok=True)
         with mag_csv_path.open("w", encoding="utf-8") as f:
@@ -325,6 +335,7 @@ def main():
 
     dt = time.time() - t0
     print(f"[DONE] processed={proc}/{len(paths)} images in {dt:.2f}s")
+    print("[NOTE] Format baru: EMB[key] adalah array terstruktur shape (1,) dengan fields: 'feat' & 'label'.")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False

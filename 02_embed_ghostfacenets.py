@@ -1,5 +1,5 @@
 # 02_embed_ghostfacenets.py
-# GhostFaceNets (Keras/TF) -> embedding .npz (512-dim, L2-normalized)
+# GhostFaceNets (Keras/TF) -> embedding .npz (feat + label, L2-normalized)
 # Argumen seragam:
 #   --repo-name ".\algoritma\GhostFaceNets"
 #   --dataset-name ".\dataset\Dosen_112"
@@ -7,13 +7,15 @@
 #   --out ".\embeds\embeds_ghostfacenet_w1p3_s2.npz"
 #   --batch 128 --device cpu|cuda --limit 0
 #
-# Catatan:
-# - Jika file .h5 berisi "full model", skrip memotong ke head embedding (512).
-# - Jika file .h5 hanya weights, skrip membangun backbone dari repo (--repo-name)
-#   lalu memuat weights by_name (skip mismatch).
+# Output NPZ:
+#   key   : path relatif gambar (posix)
+#   value : structured array shape (1,) berisi:
+#           - 'feat'  : float32[emb_dim]
+#           - 'label' : unicode (ID dari nama folder)
 
 import os, sys, argparse
 from pathlib import Path
+from typing import List
 import cv2, numpy as np
 from tqdm import tqdm
 
@@ -22,12 +24,13 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
+SUPPORTED_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
 
 def log(*a): print(*a, flush=True)
 
 def force_device(device_flag: str):
     dev = (device_flag or "cpu").strip().lower()
-    # CPU paksa nonaktifkan GPU di TF
+    # CPU -> paksa nonaktifkan GPU untuk TensorFlow
     if dev == "cpu":
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
     return dev
@@ -121,12 +124,32 @@ def embed_batch(model, batch_imgs):
     y = y / np.maximum(1e-12, np.linalg.norm(y, axis=1, keepdims=True))
     return y
 
-def list_images(root: Path):
-    exts = (".jpg", ".jpeg", ".png")
-    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
+def list_images(root: Path) -> List[Path]:
+    return sorted([p for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
+
+def relpath_posix(root: Path, abs_path: Path) -> str:
+    return abs_path.resolve().relative_to(root).as_posix()
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - Jika ada 'gallery'/'probe', gunakan segmen setelahnya (jika bukan nama file).
+      - Jika tidak ada, gunakan nama folder induk.
+      - Fallback: gunakan nama file (tanpa ekstensi).
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
 
 def main():
-    ap = argparse.ArgumentParser(description="GhostFaceNets embedding -> .npz (512-dim, L2-normalized)")
+    ap = argparse.ArgumentParser(description="GhostFaceNets embedding -> .npz (feat + label, 512-dim, L2-normalized)")
     # Argumen seragam
     ap.add_argument("--repo-name", required=True, help="Folder repo GhostFaceNets yang berisi subfolder 'backbones'")
     ap.add_argument("--dataset-name", required=True, help="Folder dataset aligned, mis. .\\dataset\\Dosen_112")
@@ -139,17 +162,10 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
-    print("== GhostFaceNets Embedding (W1.3 S2) ==")
+    print("== GhostFaceNets Embedding (W1.3 S2, feat+label) ==")
     print("[LOG] args:", args)
 
-    repo_dir = Path(args.repo-name).resolve() if hasattr(args, "repo-name") else None  # guard CLI typo
-    # per Python argparse, gunakan args.repo_name (underscore). Tetap dukung nama benar:
-    try:
-        repo_dir = Path(args.repo_name).resolve()
-    except AttributeError:
-        # fallback ke yang salah ketik (jika ada)
-        if repo_dir is None:
-            sys.exit("[ERROR] Gunakan argumen --repo-name untuk menunjuk folder repo GhostFaceNets.")
+    repo_dir = Path(args.repo_name).resolve()
     dataset_root = Path(args.dataset_name).resolve()
     out_path = Path(args.out).resolve()
 
@@ -174,14 +190,20 @@ def main():
     # Muat model
     model = load_backbone(args.weights, str(repo_dir), args.device)
 
-    # sanity check output shape
+    # Sanity check & ambil dimensi embedding
     dummy = np.zeros((1,112,112,3), dtype=np.float32)
     out_dummy = model(dummy, training=False)
-    print(f"[LOG] model output shape: {tuple(out_dummy.shape)} (target [1, 512])")
+    if isinstance(out_dummy, (list, tuple)):
+        out_dummy = out_dummy[0]
+    emb_dim = int(out_dummy.shape[-1])
+    print(f"[LOG] model output shape: {tuple(out_dummy.shape)} -> emb_dim={emb_dim}")
+
+    # Siapkan dtype structured: feat + label
+    dtype_struct = np.dtype([("feat", np.float32, (emb_dim,)), ("label", "U128")])
 
     # Embedding
-    feats = {}
-    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
+    records = {}
+    rels = [relpath_posix(dataset_root, Path(p)) for p in paths]
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
@@ -194,17 +216,27 @@ def main():
         if len(buf_imgs) == B:
             F = embed_batch(model, buf_imgs)
             for j, ii in enumerate(buf_idx):
-                feats[rels[ii]] = F[j]
+                rel = rels[ii]
+                lbl = label_from_rel(rel)
+                rec = np.empty((1,), dtype=dtype_struct)
+                rec["feat"][0]  = F[j].astype(np.float32, copy=False)
+                rec["label"][0] = lbl
+                records[rel] = rec
             buf_imgs, buf_idx = [], []
 
     if buf_imgs:
         F = embed_batch(model, buf_imgs)
         for j, ii in enumerate(buf_idx):
-            feats[rels[ii]] = F[j]
+            rel = rels[ii]
+            lbl = label_from_rel(rel)
+            rec = np.empty((1,), dtype=dtype_struct)
+            rec["feat"][0]  = F[j].astype(np.float32, copy=False)
+            rec["label"][0] = lbl
+            records[rel] = rec
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_path, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    np.savez_compressed(out_path, **records)
+    print(f"[OK] Saved {len(records)} embeddings (feat+label) -> {out_path}")
 
 if __name__ == "__main__":
     main()

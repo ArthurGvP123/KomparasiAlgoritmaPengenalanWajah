@@ -1,25 +1,30 @@
 # 02_embed_epl.py
 # EPL (Empirical Prototype Learning) – Embedding generator
-# Argumen konsisten dengan skrip lain:
+# Modifikasi: MENYIMPAN label DI DALAM NPZ (structured array: feat + label).
+#
+# Argumen:
 #   --repo-name ".\algoritma\EPL"
 #   --dataset-name ".\dataset\Dosen_112"
-#   --weights ".\algoritma\weights\EPL_ResNet100_WebFace12M.pth"
+#   --weights ".\algoritma\weights\EPL_ResNet100_WebFace12M-002.pth"
 #   --out ".\embeds\embeds_epl_ir100.npz"
 #   --batch 128 --device cuda
 #
-# Catatan:
-# - Loader ckpt mengharapkan checkpoint yang menyimpan objek model (bukan hanya state_dict),
-#   sehingga backbone dapat diambil langsung. Jika ckpt hanya state_dict, akan error
-#   (butuh definisi kelas persis dari repo EPL untuk merakit model).
-# - Disediakan stub dinamis untuk 'head_VPCL' agar unpickle tidak gagal jika head tidak dibutuhkan.
+# Output .npz:
+#   key   : path relatif gambar (posix)
+#   value : structured array shape (1,) dengan fields:
+#           - 'feat'  : float32[emb_dim]
+#           - 'label' : unicode (nama ID/kelas dari folder)
 
 import os, sys, argparse, types
 from pathlib import Path
+from typing import Optional
 import cv2, numpy as np, torch
 from torch import nn
 from tqdm import tqdm
 
 def log(*a): print(*a, flush=True)
+
+SUPPORTED_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
 
 def preprocess_arcface(img_bgr, size=112):
     img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -31,8 +36,28 @@ def preprocess_arcface(img_bgr, size=112):
     return img
 
 def collect_images(root: Path):
-    exts = (".jpg", ".jpeg", ".png")
-    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
+    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
+
+def path_to_rel(root: Path, abs_path: Path) -> str:
+    return abs_path.resolve().relative_to(root).as_posix()
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - jika ada 'gallery'/'probe', pakai segmen setelahnya (jika bukan nama file)
+      - jika tidak ada, gunakan nama folder induk
+      - fallback: stem nama file
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
 
 # ----------------- backbone finder helpers -----------------
 def _get_attr_chain(obj, chain: str):
@@ -77,16 +102,13 @@ def _install_stub_head_vpcl():
         def __init__(self, *args, **kwargs):
             super().__init__()
         def forward(self, *args, **kwargs):
-            # Head tidak pernah dipakai untuk embedding
             raise RuntimeError("Stub head_VPCL dipanggil; untuk embedding, head tidak diperlukan.")
 
     def _make_stub(name: str):
-        # buat kelas baru bernama `name` yang mewarisi _HeadStub
         cls = type(name, (_HeadStub,), {})
         setattr(mod, name, cls)
         return cls
 
-    # Pre-register beberapa nama yang umum
     for name in [
         "UnifiedContrastive",
         "Cosface_uni_VPCL_k",
@@ -98,7 +120,6 @@ def _install_stub_head_vpcl():
     ]:
         _make_stub(name)
 
-    # Fallback: kalau ckpt mencari nama yang tidak terdaftar, buat on-demand
     def __getattr__(name):
         return _make_stub(name)
     mod.__getattr__ = __getattr__  # PEP 562
@@ -106,28 +127,26 @@ def _install_stub_head_vpcl():
     sys.modules["head_VPCL"] = mod
 
 # ----------------- import & load ckpt -----------------
-def _safe_import_epl_modules(epl_repo: str|None):
+def _safe_import_epl_modules(epl_repo: Optional[str]):
     if epl_repo:
         epl_repo = os.path.abspath(epl_repo)
         if epl_repo not in sys.path:
             sys.path.insert(0, epl_repo)
-    # Import backbone jika ada; tidak wajib
     try:
         __import__("backbone")
     except Exception:
         pass
-    # Pastikan head_VPCL tersedia (asli atau stub)
     try:
         __import__("head_VPCL")
     except Exception:
         _install_stub_head_vpcl()
 
-def _load_ckpt_allow_unpickle(weights_path: str, epl_repo: str|None):
+def _load_ckpt_allow_unpickle(weights_path: str, epl_repo: Optional[str]):
     _safe_import_epl_modules(epl_repo)
-    # Gunakan unpickle penuh (pastikan sumber ckpt terpercaya)
+    # Gunakan unpickle penuh (pastikan sumber ckpt terpercaya!)
     return torch.load(weights_path, map_location="cpu", weights_only=False)
 
-def load_backbone(weights_path: str, device: str = "cpu", epl_repo: str|None = None):
+def load_backbone(weights_path: str, device: str = "cpu", epl_repo: Optional[str] = None):
     log(f"[LOG] load_backbone dari ckpt: {weights_path}")
     ckpt = _load_ckpt_allow_unpickle(weights_path, epl_repo)
 
@@ -173,10 +192,10 @@ def embed_batch(model, batch_imgs, device):
 
 # ----------------- main -----------------
 def main():
-    ap = argparse.ArgumentParser(description="EPL – Empirical Prototype Learning | Embedding generator (argumen konsisten)")
+    ap = argparse.ArgumentParser(description="EPL – Embedding generator (menyimpan feat+label per key di NPZ)")
     ap.add_argument("--repo-name", default="", help="Path repo EPL (berisi backbone.py, dll). Contoh: .\\algoritma\\EPL")
     ap.add_argument("--dataset-name", required=True, help="Path folder dataset aligned (mis. .\\dataset\\Dosen_112)")
-    ap.add_argument("--weights", required=True, help="Path checkpoint EPL_ResNet100_WebFace12M.pth")
+    ap.add_argument("--weights", required=True, help="Path checkpoint EPL_ResNet100_WebFace12M-002.pth")
     ap.add_argument("--out", required=True, help="File output .npz (mis. .\\embeds\\embeds_epl_ir100.npz)")
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--device", choices=["cpu","cuda"], default="cpu")
@@ -197,7 +216,7 @@ def main():
     log(f"[LOG] dataset_root : {dataset_root}")
     log(f"[LOG] out_path     : {out_path}")
     if args.repo_name:
-        log(f"[LOG] repo-name    : {args.repo_name}")
+        log(f"[LOG] repo-name   : {args.repo_name}")
 
     paths = collect_images(dataset_root)
     log(f"[LOG] ditemukan {len(paths)} gambar di {dataset_root}")
@@ -210,20 +229,26 @@ def main():
     # Muat backbone
     model = load_backbone(args.weights, device=device, epl_repo=(args.repo_name or None))
 
-    # Sanity check satu sampel
+    # ============ Sanity check 1 sampel & ambil emb_dim ============
     try:
         smp = cv2.imread(paths[0]); assert smp is not None
         smp_pre = preprocess_arcface(smp, 112)
         smp_feat = embed_batch(model, [smp_pre], device)[0]
-        log(f"[LOG] sanity-check: feat norm={np.linalg.norm(smp_feat):.6f}")
+        emb_dim = int(smp_feat.shape[0])
+        log(f"[LOG] sanity-check: feat dim={emb_dim}, norm={np.linalg.norm(smp_feat):.6f}")
     except Exception as e:
         sys.exit(f"[ERROR] Sanity-check gagal: {e}")
 
-    feats = {}
+    # dtype structured: (feat + label)
+    dtype_struct = np.dtype([('feat', np.float32, (emb_dim,)), ('label', 'U128')])
+
+    # Proses embedding -> simpan structured array per key
+    records = {}
     rels = [str(Path(p).relative_to(dataset_root)).replace("\\","/") for p in paths]
     B = max(1, int(args.batch))
     buf_imgs, buf_idx = [], []
 
+    proc = 0
     for i, p in enumerate(tqdm(paths, desc=f"Embedding[EPL-backbone {device}]")):
         img = cv2.imread(p)
         if img is None:
@@ -233,17 +258,30 @@ def main():
         if len(buf_imgs) == B:
             F = embed_batch(model, buf_imgs, device)
             for j, ii in enumerate(buf_idx):
-                feats[rels[ii]] = F[j]
+                rel = rels[ii]
+                lbl = label_from_rel(rel)
+                rec = np.empty((1,), dtype=dtype_struct)
+                rec['feat'][0]  = F[j].astype(np.float32, copy=False)
+                rec['label'][0] = lbl
+                records[rel] = rec
+            proc += len(buf_imgs)
             buf_imgs, buf_idx = [], []
 
     if buf_imgs:
         F = embed_batch(model, buf_imgs, device)
         for j, ii in enumerate(buf_idx):
-            feats[rels[ii]] = F[j]
+            rel = rels[ii]
+            lbl = label_from_rel(rel)
+            rec = np.empty((1,), dtype=dtype_struct)
+            rec['feat'][0]  = F[j].astype(np.float32, copy=False)
+            rec['label'][0] = lbl
+            records[rel] = rec
+        proc += len(buf_imgs)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_path, **feats)
-    log(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    np.savez_compressed(out_path, **records)
+    log(f"[OK] Saved {len(records)} embeddings -> {out_path}")
+    log(f"[DONE] processed={proc}/{len(paths)} images")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False

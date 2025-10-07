@@ -1,5 +1,6 @@
 # 02_embed_elasticface.py
-# ElasticFace embedding (IResNet-100, 112x112) dengan argumen konsisten:
+# ElasticFace embedding (IResNet-100, 112x112), MENYIMPAN label DI DALAM NPZ (structured array: feat + label).
+# Argumen konsisten:
 #   --repo-name ".\algoritma\ElasticFace"
 #   --dataset-name ".\dataset\Dosen_112"
 #   --weights ".\algoritma\weights\elasticface_ir100_backbone.pth"
@@ -7,9 +8,16 @@
 #   --out ".\embeds\embeds_elasticface_ir100.npz"
 #   --batch 128
 #
-# Catatan:
-# - Jika impor iresnet100 dari repo gagal, fallback ke arsitektur internal yang kompatibel (512-D).
-# - Output .npz berisi pasangan key=relpath (relatif ke dataset root), value=vector fitur L2-normalized.
+# Output .npz:
+#   key   : path relatif gambar (posix)
+#   value : structured array shape (1,) dengan fields:
+#           - 'feat'  : float32[emb_dim]
+#           - 'label' : unicode (nama ID/kelas dari folder)
+#
+# Contoh akses:
+#   E = np.load('embeds_elasticface_ir100.npz', allow_pickle=False)
+#   arr = E['gallery/Ali/img_0001.jpg']   # -> structured array (1,)
+#   feat, label = arr['feat'][0], arr['label'][0]
 
 import os, sys, argparse
 from pathlib import Path
@@ -83,6 +91,54 @@ class IResNet_Fallback(nn.Module):
         x = self.fc(x); x = self.features(x)
         return x
 
+# ---------- Utils ----------
+SUPPORTED_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff")
+
+def preprocess_arcface(img_bgr, size=112):
+    # RGB, (x-127.5)/128, CHW
+    img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    if img.shape[:2] != (size, size):
+        img = cv2.resize(img, (size, size), interpolation=cv2.INTER_LINEAR)
+    img = img.astype(np.float32)
+    img = (img - 127.5) / 128.0
+    img = np.transpose(img, (2, 0, 1))
+    return img
+
+@torch.no_grad()
+def embed_batch(model, batch_imgs, device):
+    x = torch.from_numpy(np.stack(batch_imgs)).to(device).float()
+    y = model(x)
+    if isinstance(y, tuple):
+        y = y[0]
+    feat = y.detach().cpu().numpy()
+    # L2-normalize per baris
+    feat = feat / (np.linalg.norm(feat, axis=1, keepdims=True) + 1e-12)
+    return feat
+
+def collect_images(root: Path):
+    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in SUPPORTED_EXT])
+
+def path_to_rel(root: Path, abs_path: Path) -> str:
+    return abs_path.resolve().relative_to(root).as_posix()
+
+def label_from_rel(rel_path: str) -> str:
+    """
+    Ambil label dari path relatif:
+      - jika ada 'gallery'/'probe', pakai segmen setelahnya (jika bukan nama file)
+      - jika tidak ada, gunakan nama folder induk
+      - fallback: stem nama file
+    """
+    parts = rel_path.split("/")
+    lowers = [s.lower() for s in parts]
+    for anchor in ("gallery", "probe"):
+        if anchor in lowers:
+            i = lowers.index(anchor)
+            if i + 1 < len(parts) and "." not in parts[i + 1]:
+                return parts[i + 1]
+    if len(parts) >= 2:
+        return parts[-2]
+    return Path(rel_path).stem
+
 # ---------- Build & Load ----------
 def build_model(elastic_repo: str|None):
     """
@@ -137,35 +193,9 @@ def load_backbone(weight_path: str, elastic_repo: str|None, device: str):
     model.eval().to(device).float()
     return model
 
-# ---------- Preprocess & Embed ----------
-def preprocess_arcface(img_bgr, size=112):
-    # RGB, (x-127.5)/128, CHW
-    img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    if img.shape[:2] != (size, size):
-        img = cv2.resize(img, (size, size), interpolation=cv2.INTER_LINEAR)
-    img = img.astype(np.float32)
-    img = (img - 127.5) / 128.0
-    img = np.transpose(img, (2, 0, 1))
-    return img
-
-@torch.no_grad()
-def embed_batch(model, batch_imgs, device):
-    x = torch.from_numpy(np.stack(batch_imgs)).to(device).float()
-    y = model(x)
-    if isinstance(y, tuple):
-        y = y[0]
-    feat = y.detach().cpu().numpy()
-    # L2-normalize per baris
-    feat = feat / (np.linalg.norm(feat, axis=1, keepdims=True) + 1e-12)
-    return feat
-
-def collect_images(root: Path):
-    exts = (".jpg", ".jpeg", ".png")
-    return sorted([str(p) for p in root.rglob("*") if p.suffix.lower() in exts])
-
 # ---------- Main ----------
 def main():
-    ap = argparse.ArgumentParser(description="ElasticFace (IResNet-100) embedder, argumen konsisten.")
+    ap = argparse.ArgumentParser(description="ElasticFace (IResNet-100) embedder, menyimpan feat+label per key (NPZ).")
     ap.add_argument("--repo-name", required=False, default="",
                     help="Path folder repo ElasticFace (berisi backbones/iresnet.py). Contoh: .\\algoritma\\ElasticFace")
     ap.add_argument("--dataset-name", required=True,
@@ -204,7 +234,7 @@ def main():
     paths = collect_images(dataset_root)
     print(f"[LOG] ditemukan {len(paths)} gambar di {dataset_root}")
     if not paths:
-        sys.exit("[ERROR] Tidak ada gambar (jpg/jpeg/png) di folder dataset.")
+        sys.exit("[ERROR] Tidak ada gambar (jpg/jpeg/png/bmp/webp/tif/tiff) di folder dataset.")
     if args.limit and args.limit > 0:
         paths = paths[:args.limit]
         print(f"[LOG] MODE UJI: membatasi ke {len(paths)} gambar pertama.")
@@ -212,21 +242,26 @@ def main():
     # Muat backbone
     model = load_backbone(args.weights, args.repo_name or None, device)
 
-    # Proses embedding
-    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
-    feats = {}
-    B = max(1, int(args.batch))
-    buf_imgs, buf_idx = [], []
-
-    # sanity check 1 sampel
+    # ============ Sanity-check 1 sampel & ambil emb_dim ============
     try:
         smp = cv2.imread(paths[0]); assert smp is not None
         smp_pre = preprocess_arcface(smp, 112)
         smp_feat = embed_batch(model, [smp_pre], device)[0]
-        print(f"[LOG] sanity-check: 1 sample feat norm={np.linalg.norm(smp_feat):.6f}")
+        emb_dim = int(smp_feat.shape[0])
+        print(f"[LOG] sanity-check: 1 sample feat dim={emb_dim}, norm={np.linalg.norm(smp_feat):.6f}")
     except Exception as e:
         sys.exit(f"[ERROR] Sanity-check gagal: {e}")
 
+    # Siapkan dtype structured untuk (feat + label)
+    dtype_struct = np.dtype([('feat', np.float32, (emb_dim,)), ('label', 'U128')])
+
+    # Proses embedding -> simpan structured array per key
+    records = {}
+    B = max(1, int(args.batch))
+    buf_imgs, buf_idx = [], []
+    rels = [str(Path(p).relative_to(dataset_root)).replace("\\", "/") for p in paths]
+
+    proc = 0
     for i, p in enumerate(tqdm(paths, desc="Embedding[ElasticFace-ir100]")):
         img = cv2.imread(p)
         if img is None:
@@ -236,17 +271,30 @@ def main():
         if len(buf_imgs) == B:
             F = embed_batch(model, buf_imgs, device)
             for j, ii in enumerate(buf_idx):
-                feats[rels[ii]] = F[j]
+                rel = rels[ii]
+                lbl = label_from_rel(rel)
+                rec = np.empty((1,), dtype=dtype_struct)
+                rec['feat'][0]  = F[j].astype(np.float32, copy=False)
+                rec['label'][0] = lbl
+                records[rel] = rec
+            proc += len(buf_imgs)
             buf_imgs.clear(); buf_idx.clear()
 
     if buf_imgs:
         F = embed_batch(model, buf_imgs, device)
         for j, ii in enumerate(buf_idx):
-            feats[rels[ii]] = F[j]
+            rel = rels[ii]
+            lbl = label_from_rel(rel)
+            rec = np.empty((1,), dtype=dtype_struct)
+            rec['feat'][0]  = F[j].astype(np.float32, copy=False)
+            rec['label'][0] = lbl
+            records[rel] = rec
+        proc += len(buf_imgs)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_path, **feats)
-    print(f"[OK] Saved {len(feats)} embeddings -> {out_path}")
+    np.savez_compressed(out_path, **records)
+    print(f"[OK] Saved {len(records)} embeddings -> {out_path}")
+    print(f"[DONE] processed={proc}/{len(paths)} images")
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = False
