@@ -5,7 +5,6 @@ from torch.nn import Dropout, MaxPool2d, Sequential
 from torch.nn import Conv2d, Linear, BatchNorm1d, BatchNorm2d
 from torch.nn import ReLU, Sigmoid, Module, PReLU
 
-
 def build_model(model_name='ir_50'):
     if model_name == 'ir_101':
         return IR_101(input_size=(112, 112))
@@ -19,7 +18,6 @@ def build_model(model_name='ir_50'):
         return IR_18(input_size=(112, 112))
     else:
         raise ValueError('not a correct model name', model_name)
-
 
 def initialize_weights(modules):
     """Kaiming init untuk Conv/Linear, BN diisi 1/0."""
@@ -36,13 +34,11 @@ def initialize_weights(modules):
             if m.bias is not None:
                 m.bias.data.zero_()
 
-
 class Flatten(Module):
     """Meratakan tensor NCHW -> N x (C*H*W) dengan aman untuk non-contiguous."""
     def forward(self, input):
         # gunakan reshape agar aman untuk non-contiguous
         return input.reshape(input.size(0), -1)
-
 
 class LinearBlock(Module):
     """Conv + BN tanpa aktivasi."""
@@ -55,7 +51,6 @@ class LinearBlock(Module):
         x = self.conv(x)
         x = self.bn(x)
         return x
-
 
 class GNAP(Module):
     """Global Norm-Aware Pooling."""
@@ -77,7 +72,6 @@ class GNAP(Module):
         feature = self.bn2(x)
         return feature
 
-
 class GDC(Module):
     """Global Depthwise Convolution block."""
     def __init__(self, in_c, embedding_size):
@@ -93,7 +87,6 @@ class GDC(Module):
         x = self.linear(x)
         x = self.bn(x)
         return x
-
 
 class SEModule(Module):
     """Squeeze-and-Excitation block."""
@@ -114,7 +107,6 @@ class SEModule(Module):
         x = self.fc2(x)
         x = self.sigmoid(x)
         return module_input * x
-
 
 class BasicBlockIR(Module):
     """BasicBlock untuk IRNet."""
@@ -138,7 +130,6 @@ class BasicBlockIR(Module):
         shortcut = self.shortcut_layer(x)
         res = self.res_layer(x)
         return res + shortcut
-
 
 class BottleneckIR(Module):
     """Bottleneck untuk IRNet."""
@@ -167,27 +158,21 @@ class BottleneckIR(Module):
         res = self.res_layer(x)
         return res + shortcut
 
-
 class BasicBlockIRSE(BasicBlockIR):
     def __init__(self, in_channel, depth, stride):
         super(BasicBlockIRSE, self).__init__(in_channel, depth, stride)
         self.res_layer.add_module("se_block", SEModule(depth, 16))
-
 
 class BottleneckIRSE(BottleneckIR):
     def __init__(self, in_channel, depth, stride):
         super(BottleneckIRSE, self).__init__(in_channel, depth, stride)
         self.res_layer.add_module("se_block", SEModule(depth, 16))
 
-
 class Bottleneck(namedtuple('Block', ['in_channel', 'depth', 'stride'])):
     """Deskripsi blok ResNet."""
 
-
 def get_block(in_channel, depth, num_units, stride=2):
-    return [Bottleneck(in_channel, depth, stride)] + \
-           [Bottleneck(depth, depth, 1) for _ in range(num_units - 1)]
-
+    return [Bottleneck(in_channel, depth, stride)] +            [Bottleneck(depth, depth, 1) for _ in range(num_units - 1)]
 
 def get_blocks(num_layers):
     if num_layers == 18:
@@ -235,7 +220,6 @@ def get_blocks(num_layers):
     else:
         raise ValueError("Unsupported num_layers")
     return blocks
-
 
 class Backbone(Module):
     def __init__(self, input_size, num_layers, mode='ir'):
@@ -300,42 +284,32 @@ class Backbone(Module):
         output = torch.div(x, norm)
         return output, norm
 
-
 def IR_18(input_size):
     return Backbone(input_size, 18, 'ir')
-
 
 def IR_34(input_size):
     return Backbone(input_size, 34, 'ir')
 
-
 def IR_50(input_size):
     return Backbone(input_size, 50, 'ir')
-
 
 def IR_101(input_size):
     return Backbone(input_size, 100, 'ir')
 
-
 def IR_152(input_size):
     return Backbone(input_size, 152, 'ir')
-
 
 def IR_200(input_size):
     return Backbone(input_size, 200, 'ir')
 
-
 def IR_SE_50(input_size):
     return Backbone(input_size, 50, 'ir_se')
-
 
 def IR_SE_101(input_size):
     return Backbone(input_size, 100, 'ir_se')
 
-
 def IR_SE_152(input_size):
     return Backbone(input_size, 152, 'ir_se')
-
 
 def IR_SE_200(input_size):
     return Backbone(input_size, 200, 'ir_se')

@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
-from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, ReLU, Sigmoid, Dropout, MaxPool2d, \
-    AdaptiveAvgPool2d, Sequential, Module
+from torch.nn import Linear, Conv2d, BatchNorm1d, BatchNorm2d, PReLU, ReLU, Sigmoid, Dropout, MaxPool2d,     AdaptiveAvgPool2d, Sequential, Module
 from collections import namedtuple
 
-
 # Support: ['IR_50', 'IR_101', 'IR_152', 'IR_SE_50', 'IR_SE_101', 'IR_SE_152']
-
 
 class Flatten(Module):
     def forward(self, input):
@@ -14,12 +11,10 @@ class Flatten(Module):
         # safer for non-contiguous tensors:
         return torch.flatten(input, 1)
 
-
 def l2_norm(input, axis=1):
     norm = torch.norm(input, 2, axis, True)
     output = torch.div(input, norm)
     return output
-
 
 class SEModule(Module):
     def __init__(self, channels, reduction):
@@ -45,7 +40,6 @@ class SEModule(Module):
         x = self.sigmoid(x)
         return module_input * x
 
-
 class bottleneck_IR(Module):
     def __init__(self, in_channel, depth, stride):
         super(bottleneck_IR, self).__init__()
@@ -65,7 +59,6 @@ class bottleneck_IR(Module):
         shortcut = self.shortcut_layer(x)
         res = self.res_layer(x)
         return res + shortcut
-
 
 class bottleneck_IR_SE(Module):
     def __init__(self, in_channel, depth, stride):
@@ -90,14 +83,11 @@ class bottleneck_IR_SE(Module):
         res = self.res_layer(x)
         return res + shortcut
 
-
 class Bottleneck(namedtuple('Block', ['in_channel', 'depth', 'stride'])):
     '''A named tuple describing a ResNet block.'''
 
-
 def get_block(in_channel, depth, num_units, stride=2):
     return [Bottleneck(in_channel, depth, stride)] + [Bottleneck(depth, depth, 1) for i in range(num_units - 1)]
-
 
 def get_blocks(num_layers):
     if num_layers == 50:
@@ -122,7 +112,6 @@ def get_blocks(num_layers):
             get_block(in_channel=256, depth=512, num_units=3)
         ]
     return blocks
-
 
 class Backbone(Module):
     def __init__(self, input_size, num_layers, mode='ir'):
@@ -190,13 +179,11 @@ def IR_50(input_size):
     model = Backbone(input_size, 50, 'ir')
     return model
 
-
 def IR_101(input_size):
     """Constructs a ir-101 model.
     """
     model = Backbone(input_size, 100, 'ir')
     return model
-
 
 def IR_152(input_size):
     """Constructs a ir-152 model.
@@ -204,20 +191,17 @@ def IR_152(input_size):
     model = Backbone(input_size, 152, 'ir')
     return model
 
-
 def IR_SE_50(input_size):
     """Constructs a ir_se-50 model.
     """
     model = Backbone(input_size, 50, 'ir_se')
     return model
 
-
 def IR_SE_101(input_size):
     """Constructs a ir_se-101 model.
     """
     model = Backbone(input_size, 100, 'ir_se')
     return model
-
 
 def IR_SE_152(input_size):
     """Constructs a ir_se-152 model.
